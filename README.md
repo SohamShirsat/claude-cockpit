@@ -47,16 +47,28 @@ Set them from the plugin's settings in Claude Code (`userConfig`):
 
 | | |
 | --- | --- |
-| **Jump** | **any key**. Pressing ▶ play puts the keyboard on the game (desktop: the guidance line is a focused text field; Esc gives the keys back to the prompt). Terminal: `Space` / `↑` with an empty prompt box, or any key after a click on the game |
+| **Jump** | **any key** (Space, the arrows, letters, Enter), or the **▲ jump** button. Pressing ▶ play puts the keyboard on the game: the guidance line is a focused text field. If the app does not hand the keys over, the line says **click here, then any key**: one click on it does it. Esc gives the keys back to the prompt. Terminal: `Space` / `↑` with an empty prompt box, or any key after a click on the game |
 | **Start / retry** | the same keys, `Enter`, or a click on the guidance line |
 | **Close** | `q`, or the **■ close** button in the band |
 | **Clouds** | float in the air; reach one in a jump for **+25** and a sparkle |
 | **Bugs** | ladybugs and (later in a run) big green beetles; touching one ends the run |
 | **Score** | runs up while you survive; speeds up smoothly the longer you last; best score is kept between sessions |
 
-Your prompt is never hijacked: on the desktop the keys go to the game only while the game's own field has the focus (press Esc, or click the prompt, to type again); in the terminal they only play when the game is open **and the prompt box is empty**.
+Your prompt is never hijacked: on the desktop the keys go to the game only while the game's own field has the focus (press Esc, or click the prompt, to type again; when Claude finishes the line reminds you with **esc to type**); in the terminal they only play when the game is open **and the prompt box is empty**. A key mashed in the instant a run ends does not restart it (the crash screen stays for about half a second).
 
 ![The seven costumes](docs/costumes.png)
+
+## What changed in 0.10.0
+
+The keys now have layers, because the desktop's focus rules cannot be tested outside the app and 0.9.0 depended on a single one of them.
+
+- **Asking for the keys is repeated** (at once, then after 0.12, 0.35, 0.8 and 1.6 s): a click on ▶ play may not have made the band hold the keyboard by the first ask. If every ask is refused, the line says **click here, then any key**; one click on the field does it, and the line changes back as soon as a key comes through.
+- **The arrows and Tab can no longer press things.** While the key field holds the ring, an arrow or Tab that would move it onto Play, ▲ jump or Handoff is turned into a jump and the ring stays on the field (so a Space can never close the game by pressing Play). The engine's own stops are never captured, so Esc and the way back to the prompt are never trapped.
+- **▲ jump button** beside the field: works with the mouse, with `k` when the band holds the keyboard, and on surfaces without a text field.
+- **A crash is not a retry:** presses in the first 0.45 s after a run ends are ignored.
+- **The game says when Claude is done** (`esc to type`, plus a toast), since it keeps the keys until you press Esc.
+- **The trace is kept across sessions** (`~/.claude/status-band-trace.log`, last 160 lines, time-stamped), so the evidence of a key that did nothing survives opening a new chat.
+- Removed the click-to-focus `strip.tsx` module: the desktop always has a text field.
 
 ## What changed in 0.9.0
 
@@ -79,7 +91,7 @@ Keys on the desktop finally reach the game. The prompt box owns the keyboard the
 
 | surface | drawing | file |
 | --- | --- | --- |
-| desktop | a vector scene (SVG), 340 × 68 art-pixels, redrawn every 40 ms; text lines above | `hooks/crab/scene.ts`, `hooks/strip.tsx` |
+| desktop | a vector scene (SVG), 340 × 68 art-pixels, redrawn every 40 ms; one line of text (a key field) and a jump button above | `hooks/crab/scene.ts`, `hooks/register.tsx` |
 | terminal | half-block pixels (two pixels per cell), 60 ms ticks | `hooks/runner.tsx`, `hooks/crab/mini.ts` |
 
 The desktop draws text in a proportional font, which cannot lay block characters out as pixels; hence a picture there and half-blocks in a terminal. Both play the **same rules** (`hooks/crab/game.ts`), tuned twice.
@@ -105,9 +117,9 @@ One pure function, `step(game, config)`, advances a run one tick; no timers, no 
 
 The prompt box owns the keyboard, and a plugin drawing surface only gets keys while it holds the focus. Routes:
 
-0. **Desktop key field** (`hooks/register.tsx`, `sceneView`): the guidance line is an `Input`. Play calls `$.ui.focus` on it (`focusGame`); its `onInput` is every key, `onSubmit` is Enter, and a `ui.focus` hook turns arrow / Tab ring moves into a jump and puts the ring back.
+0. **Desktop key field** (`hooks/register.tsx`, `sceneView`): the guidance line is an `Input`. Play calls `$.ui.focus` on it (`focusGame`, retried); its `onInput` is every key, `onSubmit` is Enter, and a `ui.focus` hook turns an arrow / Tab ring move onto the band's own controls into a jump and keeps the ring on the field (`hooks/keys.ts`, `ringVerdict`: pure, tested).
 1. **`prompt.edit` hook** (`hooks/register.tsx`): while the game is open and the box is empty, Space/↑ (and `k` while a run is live) are consumed there and turned into a jump. Any other key, or any non-empty draft, passes through untouched.
-2. **A `Client` surface module** (`hooks/strip.tsx`), used only where the surface has no `Input`: a click gives it the keyboard; it then reads every key (`q` closes) and posts them to the hooks module (`ui.message`).
+2. **The ▲ jump button**, on every surface: a click, or `k` while the band holds the keyboard.
 
 All presses go through one atomic `update` on the shared game state, so a key and a timer tick that land together both count.
 
@@ -118,11 +130,11 @@ All presses go through one atomic `update` on the shared game state, so a key an
 .claude-plugin/marketplace.json
 hooks/register.tsx            the band, handoff, game control, keys, timers
 hooks/runner.tsx              terminal game (Client module)
-hooks/strip.tsx               desktop guidance line + key capture (Client module)
+hooks/keys.ts                 what a move of the focus ring means, and the key hint (pure)
 hooks/crab/game.ts            rules, configs, header text
 hooks/crab/scene.ts           desktop SVG scene (crab, bugs, clouds, sparkles)
 hooks/crab/master.ts, mini.ts full-size and game-size crab sprites
-hooks/*.test.ts(x)            69 tests
+hooks/*.test.ts(x)            82 tests
 assets/crab/                  the crab as SVG / PNG / JSON (see its README)
 scripts/                      asset builder, scene preview, docs-image builder
 docs/                         the images in this README
@@ -132,7 +144,7 @@ types/index.d.ts              the plugin's state contract
 ## Troubleshooting
 
 - **Nothing changed after updating:** start a *new* session. Sessions pin the plugin version they started with.
-- **Keys do nothing:** click the guidance line above the picture once, then try again. Also look at `~/.claude/status-band-trace.log`: it names the loaded version (`session.start vX.Y.Z`) and, while a game is open, logs the first few key edits (`edit key=…`), focus attempts (`focus …`) and presses (`press via=input|ring|…`), which shows whether the key reached the plugin at all. Open an issue with those lines.
+- **Keys do nothing:** read `~/.claude/status-band-trace.log`. It is kept across sessions and time-stamped. `session.start vX.Y.Z` names the version a chat loaded (it must be 0.10.0 or newer: start a *new* chat after updating). While a game is open it logs each ask for the keyboard (`focus … try@0 ok` or `denied: <reason>`), the first keys through the field (`key via=input`), ring moves read as keys (`ring jump …`), and prompt-box edits (`edit key=…`). If every `focus` line says `denied`, the line above the picture reads *click here, then any key*: click it once. If there are no `key via=input` lines after you clicked the field and typed, the field is not receiving keys at all: send those lines.
 - **"No room for the game here":** the window is too short; make it taller (the game needs 7 rows).
 - **Play button missing:** the band needs at least 30 columns, and `buddy` must be `game`.
 
@@ -140,7 +152,7 @@ types/index.d.ts              the plugin's state contract
 
 ```bash
 npx -y -p typescript tsc -p .      # type-check
-claude plugin test .               # 69 tests
+claude plugin test .               # 82 tests
 claude plugin validate .
 ```
 
