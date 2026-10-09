@@ -1,6 +1,6 @@
 {
   "name": "status-band",
-  "version": "0.10.0",
+  "version": "0.11.1",
   "description": "Compact text band above the prompt: context %, cache countdown, 5h/7d limits, one-click handoff, and a tokenless mascot and a Claude-crab runner game while Claude works.",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -40,6 +40,16 @@
         "off"
       ],
       "default": "game"
+    },
+    "motion": {
+      "type": "string",
+      "title": "Game motion",
+      "description": "smooth = the picture is played ahead and animated by the display (steady at any speed); classic = redrawn every step like 0.10.",
+      "options": [
+        "smooth",
+        "classic"
+      ],
+      "default": "smooth"
     }
   },
   "author": {

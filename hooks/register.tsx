@@ -1,9 +1,10 @@
 import { atom, read, update } from 'claude-code'
 import type { Elements, Hook, Register } from 'claude-code'
 
-import type { Cache, Game, HandoffPhase, Repo, Usage } from '../types'
-import { act, deskConfig, fresh, header, lookFor, step } from './crab/game'
-import { sceneSvg } from './crab/scene'
+import type { Cache, HandoffPhase, Repo, RunView, Usage } from '../types'
+import { act, ahead, deskConfigFor, deskLine, FIELD, fresh, lookFor, step } from './crab/game'
+import type { Config, Game } from './crab/game'
+import { motionSvg, SCENE } from './crab/scene'
 import { keyHint, ringVerdict } from './keys'
 
 type Dollar = Parameters<Hook<'session.start'>>[0]
@@ -17,19 +18,39 @@ const runAtom = atom({ plugin: 'status-band', key: 'game' } as const, null)
 // the terminal's game lives in its Client: each press of the prompt's keys bumps this, and the Client acts on a change
 const signalAtom = atom({ plugin: 'status-band', key: 'jumpSignal' } as const, 0)
 
-const VERSION = '0.10.0'
+const VERSION = '0.11.1'
 // rows the game takes: the terminal's is a header, the five rows of the field and the ground;
 // the desktop's the one line of guidance (which is also the click target) and the picture (108 px)
-const GAME_ROWS = { text: 7, svg: 7 } as const
-// a tick that comes late runs the steps it owes (up to this many), so the speed stays true
-const MAX_CATCHUP = 4
-const SCENE_PX_PER_COL = 7.6
-const SCENE_MAX_WIDTH = 540
+const GAME_ROWS = { text: 7, svg: 9 } as const
+// the module's timer is this late (ms) only when the whole app was stalled (asleep): the run then waits
+// for it instead of ending behind its back
+const STALL_MS = 250
+// the picture fills the band: a character cell is about this many pixels wide, and a game unit this many pixels
+const SCENE_PX_PER_COL = 8.4
+const SCENE_MAX_WIDTH = 1000
+const PX_PER_UNIT = 2
+// the picture is a plan: this many steps of the run played ahead (7.7 s), carried as animation so the
+// display moves it on its own clock; a new one is drawn when a press changes it, or when this few remain
+const PLAN_TICKS = 192
+const REPLAN_LEFT = 48
+// the picture is drawn this far ahead of the moment it is made, to meet the display where it will be
+// when the picture arrives (the markup travels, then decodes)
+const LEAD_MS = 30
+// a press of the same kind this soon after another is the same key arriving twice (the key field and a
+// hotkey both hear it) or a held key repeating: it is dropped
+const PRESS_GAP_MS = 70
+// the run is looked at least this often, whatever the plan says (it is the plan that wakes it)
+const HEARTBEAT_MS = 1000
+// a redraw of the band that nobody asked the game for restarts a picture on some surfaces: the game
+// answers it with a fresh plan, but never more than this often
+const REDRAW_MS = 600
+// the first this many presses of an opened game go to the trace, with where each came from
+const PRESS_TRACE = 80
 const GAME_PANE = 'status-band-runner'
 // the desktop's key sink: a native text field that takes every printable key while it has the focus
 const KEYS = 'keys'
 // the band's other pressables: while the ring sits on the key field, a move onto any of these is a key
-const OWN = new Set(['play', 'handoff', 'jump', KEYS])
+const OWN = new Set(['play', 'handoff', 'jump', 'duck', KEYS])
 // asking for the keyboard: a click on Play may not have made the band hold it yet, so ask a few times
 const FOCUS_TRIES_MS = [0, 120, 350, 800, 1600] as const
 // the ring counts as the game's for this long after the last sign of it (a key, or the engine's yes)
@@ -124,6 +145,31 @@ const S = {
   overAt: 0,
   focusRun: 0,
   turnDone: false,
+  // the desktop's run: the hooks module owns it and steps it by the wall clock (`advance`); the picture
+  // is a plan made from it (`replan`), and the band is told when either changed (`publish`)
+  run: null as Game | null,
+  cfg: deskConfigFor(FIELD.normal) as Config,
+  // when `run` is the state of (a tick of the run's own clock, kept to the wall clock)
+  tickAt: 0,
+  planEnd: 0,
+  svg: '',
+  seq: 0,
+  // the plan: when it was made, when it runs out, when the rules say the run ends if nothing is pressed
+  lastPlanAt: 0,
+  deathAt: Infinity,
+  dueAt: 0,
+  // the last picture the band drew (its `seq`): a draw of the same one is somebody else's redraw
+  drawnSeq: -1,
+  lastMove: '',
+  lastMoveAt: 0,
+  // what the key field held when it last spoke: only text that grew is a key
+  field: '',
+  pressed: 0,
+  isOver: false,
+  cols: 100,
+  classic: false,
+  usage: '',
+  isRefreshing: false,
 }
 
 // the trace: ~/.claude/status-band-trace.log, the last lines of what the band and its keys did.
@@ -153,7 +199,10 @@ async function trace($: Dollar, line: string) {
 function startTicking($: Dollar) {
   if (S.ticking) return
   S.ticking = true
-  $.clock.every(20000, () => $.ui.invalidate('ui.render'))
+  // not while a run plays: a redraw is what the picture is built not to need
+  $.clock.every(20000, () => {
+    if (S.run?.mode !== 'play') $.ui.invalidate('ui.render')
+  })
 }
 
 function toast($: Dollar, text: string) {
@@ -191,7 +240,11 @@ function mascotParts(ms: number) {
 
 function startBuddy($: Dollar, now: number) {
   if (S.workStart === 0) S.workStart = now
-  if (!S.workTimer) S.workTimer = $.clock.every(BUDDY_TICK_MS, () => $.ui.invalidate('ui.render'))
+  if (!S.workTimer) {
+    S.workTimer = $.clock.every(BUDDY_TICK_MS, () => {
+      if (S.run?.mode !== 'play') $.ui.invalidate('ui.render')
+    })
+  }
 }
 
 function stopBuddy() {
@@ -293,6 +346,7 @@ async function runHandoff($: Dollar) {
 function stopGameTimer() {
   if (S.gameTimer) S.gameTimer.cancel()
   S.gameTimer = null
+  S.dueAt = 0
 }
 
 async function saveBest($: Dollar, score: number) {
@@ -306,81 +360,193 @@ async function saveBest($: Dollar, score: number) {
   }
 }
 
-// the desktop's game: the hooks module owns the run and steps it on a timer while it is live;
-// the picture is drawn from it (hooks/crab/scene.ts) and the guidance line only reports presses.
-// Every change to the run goes through `update`, so a press and a tick that land together both count.
+// ---- the desktop's game -----------------------------------------------------------------------
+// The hooks module owns the run (`S.run`) and keeps it to the wall clock: one step per `tickMs`, the
+// owed steps made up when something looks at it (`advance`). The picture is not redrawn per step: it
+// is a plan, the run played ahead by the same rules and carried as animation (hooks/crab/scene.ts),
+// so the display moves everything on its own clock and a late or uneven redraw cannot make it
+// stutter. The score is drawn into it too. A new plan is made (`replan`) only when something changes
+// it: a press, the plan running low, the end of the run. Nothing wakes the module between those but
+// one timer, set for the earliest of them (`arm`), so a run at rest costs nothing.
+
+// bring the run up to the wall clock, one step per `tickMs`; true when the app had stalled meanwhile
+function advance(now: number): boolean {
+  const g = S.run
+  if (!g || g.mode !== 'play') return false
+  const ms = S.cfg.tickMs
+  let n = g
+  const upTo = (until: number) => {
+    while (n.mode === 'play' && S.tickAt + ms <= until) {
+      n = step(n, S.cfg)
+      S.tickAt += ms
+    }
+  }
+  // the one timer is late by more than a moment: the app was stalled, and the run waits for it
+  const late = S.dueAt > 0 ? now - S.dueAt : 0
+  const isStalled = late > STALL_MS
+  if (isStalled) {
+    upTo(S.dueAt)
+    S.tickAt += late
+  } else {
+    upTo(now)
+  }
+  S.run = n
+  if (n.mode === 'over') S.overAt = S.tickAt
+
+  return isStalled
+}
+
+// make the picture for the run as it is: a still, or (while it plays) the plan from the moment the
+// picture will be on screen
+function replan(now: number) {
+  const g = S.run
+  if (!g) return
+  const cfg = S.cfg
+  const ms = cfg.tickMs
+  const size = { width: cfg.width * PX_PER_UNIT, height: SCENE.h * PX_PER_UNIT }
+  S.lastPlanAt = now
+  if (g.mode !== 'play' || S.classic) {
+    S.svg = motionSvg({ states: [g], phase: 0, overAge: g.mode === 'over' ? Math.max(0, (now - S.overAt) / ms) : undefined }, cfg, size)
+    S.planEnd = 0
+    S.deathAt = Infinity
+
+    return
+  }
+  const owed = Math.max(0, (now + LEAD_MS - S.tickAt) / ms)
+  const whole = Math.floor(owed)
+  const run = ahead(g, cfg, whole + PLAN_TICKS)
+  const phase = owed - whole
+  S.svg = motionSvg({ states: run.slice(whole), phase }, cfg, size)
+  S.planEnd = now + LEAD_MS + (PLAN_TICKS - phase) * ms
+  const end = run.findIndex(r => r.mode === 'over')
+  S.deathAt = end < 0 ? Infinity : S.tickAt + end * ms
+}
+
+async function publish($: Dollar) {
+  const game = S.run
+  if (!game) return
+  S.seq++
+  const view: RunView = { game, svg: S.svg, units: S.cfg.width, seq: S.seq }
+  await update($, runAtom, () => view)
+}
+
+// the one timer: for the earliest of the end of the run (if nothing is pressed), the plan running low,
+// and a look every second
+function arm($: Dollar, now: number) {
+  stopGameTimer()
+  if (S.run?.mode !== 'play') return
+  const ms = S.cfg.tickMs
+  const due = S.classic ? now + ms : Math.min(S.deathAt + ms / 2, S.planEnd - LEAD_MS - REPLAN_LEFT * ms, now + HEARTBEAT_MS)
+  const wait = Math.max(4, due - now)
+  S.dueAt = now + wait
+  S.gameTimer = $.clock.after(wait, () => void tickGame($))
+}
+
+// a run just ended: show the last picture, keep the best score
+async function finish($: Dollar, now: number) {
+  if (S.isOver) return
+  S.isOver = true
+  stopGameTimer()
+  replan(now)
+  await publish($)
+  if (S.run) await saveBest($, S.run.best)
+  void trace($, `over score=${Math.floor(S.run?.score ?? 0)} cause=${S.run?.cause ?? ''} tick=${S.run?.tick ?? 0}`)
+}
+
 async function tickGame($: Dollar) {
   if (S.isGameBusy) return
   S.isGameBusy = true
   try {
-    const live = await read($, runAtom)
-    if (!live || live.mode !== 'play') {
-      stopGameTimer()
+    S.gameTimer = null
+    if (!S.run || S.run.mode !== 'play') return
+    const now = await $.clock.now()
+    const stalled = advance(now)
+    // advancing is what ends a run: read S.run again, it is not what the check above narrowed it to
+    if ((S.run as Game | null)?.mode === 'over') {
+      await finish($, now)
       return
     }
-    // the steps owed since the last tick: one when the timer is on time, more when a frame ran long
-    const now = await $.clock.now()
-    const ms = deskConfig.tickMs
-    const elapsed = S.lastTick === 0 || now <= S.lastTick ? ms : now - S.lastTick
-    S.lastTick = now
-    S.owed = Math.min(S.owed + elapsed, ms * MAX_CATCHUP)
-    const due = Math.floor(S.owed / ms + 0.2)
-    if (due < 1) return
-    S.owed -= due * ms
-    const next = await update($, runAtom, g => {
-      if (!g || g.mode !== 'play') return g
-      let n = g
-      for (let i = 0; i < due && n.mode === 'play'; i++) n = step(n, deskConfig)
-
-      return n
-    })
-    if (next?.mode === 'over') {
-      stopGameTimer()
-      S.overAt = now
-      await saveBest($, next.best)
+    // the plan is renewed while some is left, or at every step in the classic mode
+    if (stalled || S.classic || now + LEAD_MS >= S.planEnd - REPLAN_LEFT * S.cfg.tickMs) {
+      replan(now)
+      await publish($)
     }
+    arm($, now)
   } finally {
     S.isGameBusy = false
   }
 }
 
-// a press starts a run, retries after one, or jumps. A press in the instant a run ends is the
-// crash happening under the person's fingers, not a request for another: it is ignored.
-async function pressJump($: Dollar) {
+// a press starts a run, retries after one, jumps, or ducks. A press in the instant a run ends is the
+// crash happening under the person's fingers, not a request for another: it is ignored. `via` is where
+// it came from, for the trace.
+async function press($: Dollar, move: 'jump' | 'duck' = 'jump', via = '?') {
   const now = await $.clock.now()
-  let isStart = false
-  const next = await update($, runAtom, g => {
-    if (g?.mode === 'over' && now - S.overAt < RETRY_GUARD_MS) return g
-    isStart = g !== null && g.mode !== 'play'
-
-    return g ? act(g, deskConfig) : g
-  })
-  if (isStart && next?.mode === 'play' && !S.gameTimer) {
-    S.lastTick = 0
-    S.owed = 0
-    S.gameTimer = $.clock.every(deskConfig.tickMs, () => void tickGame($))
+  const before = S.run
+  if (!before) return
+  const note = (what: string) => {
+    if (S.pressed >= PRESS_TRACE) return
+    S.pressed++
+    void trace($, `press ${what} via=${via} move=${move} mode=${before.mode}`)
   }
+  // one key arrives by more than one road (the field and a hotkey), and a held key repeats
+  if (move === S.lastMove && now - S.lastMoveAt < PRESS_GAP_MS) {
+    note('dropped(repeat)')
+    return
+  }
+  S.lastMove = move
+  S.lastMoveAt = now
+  advance(now)
+  // advancing is what ends a run, and S.run is the module's to move: read it again
+  const g = S.run as Game | null
+  if (!g) return
+  if (before.mode === 'play' && g.mode === 'over') {
+    await finish($, now)
+    return
+  }
+  if (g.mode === 'over' && now - S.overAt < RETRY_GUARD_MS) {
+    note('dropped(crash)')
+    return
+  }
+  const next = act(g, S.cfg, move)
+  if (next === g) {
+    note('nothing')
+    return
+  }
+  note(g.mode === 'play' ? `jump=${g.jump}->${next.jump} duck=${next.duck} queued=${next.queued}` : 'start')
+  const isStart = g.mode !== 'play'
+  S.run = next
+  if (isStart) {
+    S.tickAt = now
+    S.isOver = false
+  }
+  replan(now)
+  arm($, now)
+  await publish($)
 }
 
 // the keys that play, read at the prompt box: it owns the keyboard, so a key reaches a game that
 // was never clicked only this way. Space and ↑ always; k only while a run is live, so a draft that
 // starts with k is never in the way while the game waits. Only an empty box is ever touched.
-const SPACE_KEYS = new Set([' ', 'space', 'up', 'down', 'w'])
+const SPACE_KEYS = new Set([' ', 'space', 'up', 'w'])
+const DUCK_KEYS = new Set(['down'])
 
-async function isGameKey($: Dollar, e: { text: string; inputText: string; key?: { key: string; ctrl?: true; meta?: true } }) {
-  if (e.text !== '' || e.key?.ctrl || e.key?.meta) return false
-  if (!(await read($, gameAtom))) return false
+// which move a key at the prompt box is, or null when it is just typing
+async function gameKey($: Dollar, e: { text: string; inputText: string; key?: { key: string; ctrl?: true; meta?: true } }): Promise<'jump' | 'duck' | null> {
+  if (e.text !== '' || e.key?.ctrl || e.key?.meta) return null
+  if (!(await read($, gameAtom))) return null
   const k = e.key?.key
   // a space with no key named (folded into a burst) is still only blank
-  if (k === undefined) return e.inputText !== '' && e.inputText.trim() === ''
-  if (SPACE_KEYS.has(k)) return e.inputText.trim() === ''
-  if (k === 'k') return S.gameSurface === 'svg' && (await read($, runAtom))?.mode === 'play'
+  if (k === undefined) return e.inputText !== '' && e.inputText.trim() === '' ? 'jump' : null
+  if (SPACE_KEYS.has(k)) return e.inputText.trim() === '' ? 'jump' : null
+  if (DUCK_KEYS.has(k)) return e.inputText.trim() === '' ? 'duck' : null
+  if (k === 'k' || k === 'j') return S.gameSurface === 'svg' && S.run?.mode === 'play' ? (k === 'k' ? 'jump' : 'duck') : null
 
-  return false
+  return null
 }
 
-async function pressKeys($: Dollar) {
-  if (S.gameSurface === 'svg') await pressJump($)
+async function pressKeys($: Dollar, move: 'jump' | 'duck') {
+  if (S.gameSurface === 'svg') await press($, move, 'box')
   else await update($, signalAtom, n => (n ?? 0) + 1)
 }
 
@@ -429,9 +595,13 @@ function setKeys($: Dollar, state: 'wait' | 'live' | 'click') {
   $.ui.invalidate('ui.render')
 }
 
-// every key the key field takes: q closes the game, anything else plays
+// every key the key field takes: q closes the game, j and s duck, anything else jumps. The field keeps
+// what was typed in it until the band draws another value, and says so at every change, so a key is
+// text that did not shrink: a reset to nothing, or a Backspace, is not one.
 async function typedKeys($: Dollar, text: string) {
-  if (!text) return
+  const before = S.field
+  S.field = text
+  if (!text || text.length < before.length) return
   S.ring = KEYS
   S.ringAt = await $.clock.now()
   // a key came through the field, so the keys do reach the game, whatever the engine said
@@ -440,12 +610,14 @@ async function typedKeys($: Dollar, text: string) {
     S.logged++
     void trace($, `key via=input ${JSON.stringify(text)}`)
   }
-  if (text.trim().toLowerCase().endsWith('q')) await closeGame($)
-  else await pressJump($)
+  const last = text.toLowerCase().slice(-1)
+  if (last === 'q') await closeGame($)
+  else await press($, last === 'j' || last === 's' ? 'duck' : 'jump', 'field')
 }
 
 async function closeGame($: Dollar) {
   stopGameTimer()
+  S.run = null
   S.focusRun++
   S.ring = ''
   S.keys = 'wait'
@@ -470,6 +642,10 @@ async function toggleGame($: Dollar, isSvg: boolean) {
   const rows = isSvg ? GAME_ROWS.svg : GAME_ROWS.text
   S.gameSurface = isSvg ? 'svg' : 'text'
   S.logged = 0
+  S.pressed = 0
+  S.field = ''
+  S.lastMove = ''
+  S.drawnSeq = -1
   S.keys = 'wait'
   S.ring = ''
   S.turnDone = false
@@ -487,11 +663,52 @@ async function toggleGame($: Dollar, isSvg: boolean) {
     S.isPaneOpen = true
   }
   const [best, now] = await Promise.all([read($, bestAtom), $.clock.now()])
-  await update($, runAtom, () => fresh(best, 1 + (now % 99991), 'ready', lookFor(S.costume, Math.floor(now / 60000)), deskConfig))
+  if (isSvg) {
+    // the field is as wide as the band, so the picture fills it
+    const units = Math.max(FIELD.min, Math.min(FIELD.max, Math.round(Math.min(SCENE_MAX_WIDTH, S.cols * SCENE_PX_PER_COL) / PX_PER_UNIT)))
+    S.cfg = deskConfigFor(units)
+    S.run = fresh(best, 1 + (now % 99991), 'ready', lookFor(S.costume, Math.floor(now / 60000)), S.cfg)
+    S.isOver = false
+    replan(now)
+    await publish($)
+  }
   await update($, gameAtom, () => true)
   // Play was a click in the band: hand the keyboard to the game's key field once it is drawn (the
   // press itself is not held up by the asking)
   void focusGame($)
+}
+
+// the band is being drawn with the picture it drew last: the draw was somebody else's (a turn ended,
+// a limit moved, the window changed). On some surfaces that restarts an animated picture from its first
+// moment, so the game answers with a plan from now, once the draw is over (an atom is not written from
+// inside a draw), and never more than every REDRAW_MS.
+function drawn($: Dollar, view: RunView | null, now: number) {
+  if (!view || S.gameSurface !== 'svg') return
+  if (view.seq !== S.drawnSeq) {
+    S.drawnSeq = view.seq
+    return
+  }
+  if (S.run?.mode !== 'play' || S.classic || S.isRefreshing || now - S.lastPlanAt < REDRAW_MS) return
+  S.isRefreshing = true
+  void $.clock.after(0, () => void refresh($))
+}
+
+async function refresh($: Dollar) {
+  try {
+    const now = await $.clock.now()
+    if (!S.run || S.run.mode !== 'play') return
+    advance(now)
+    if ((S.run as Game | null)?.mode === 'over') {
+      await finish($, now)
+      return
+    }
+    void trace($, 'redraw: plan renewed')
+    replan(now)
+    arm($, now)
+    await publish($)
+  } finally {
+    S.isRefreshing = false
+  }
 }
 
 type VectorEls = Elements['desktop'] | Elements['vscode'] | Elements['mobile']
@@ -500,12 +717,12 @@ type VectorEls = Elements['desktop'] | Elements['vscode'] | Elements['mobile']
 // that line is the field itself (it takes the focus ring, every printable key reaches it, Enter
 // plays), with a small jump button beside it for the mouse and for the hotkey. Elsewhere it is plain
 // text with the same button.
-function sceneView($: Dollar, els: VectorEls, run: Game, bodyColumns: number) {
+function sceneView($: Dollar, els: VectorEls, view: RunView, bodyColumns: number) {
   const { Box, Button, Svg, Text } = els
   const Input = 'Input' in els ? els.Input : null
   const width = Math.max(150, Math.min(SCENE_MAX_WIDTH, Math.floor(bodyColumns * SCENE_PX_PER_COL)))
-  const height = Math.round(width / 5)
-  const line = header(run, Input ? keyHint(S.keys, S.turnDone) : undefined)
+  const height = Math.round((width * SCENE.h) / view.units)
+  const line = deskLine(view.game, Input ? keyHint(S.keys, S.turnDone) : undefined)
 
   return (
     <Box key="game" flexDirection="column">
@@ -520,7 +737,7 @@ function sceneView($: Dollar, els: VectorEls, run: Game, bodyColumns: number) {
               submitLabel="jump"
               autoFocus
               onInput={text => void typedKeys($, text)}
-              onSubmit={() => void pressJump($)}
+              onSubmit={() => void press($, 'jump', 'enter')}
             />
           ) : (
             <Box>
@@ -531,12 +748,13 @@ function sceneView($: Dollar, els: VectorEls, run: Game, bodyColumns: number) {
             </Box>
           )}
         </Box>
-        <Button key="jump" label="▲ jump" hotkey="k" plain dimColor onPress={() => pressJump($)} />
+        <Button key="duck" label="▼ duck" hotkey="j" plain dimColor onPress={() => press($, 'duck', 'button')} />
+        <Button key="jump" label="▲ jump" hotkey="k" plain dimColor onPress={() => press($, 'jump', 'button')} />
       </Box>
       <Svg
         key="scene"
-        source={sceneSvg(run, deskConfig, { width, height })}
-        alt={`Claude crab game: ${run.mode}, score ${Math.floor(run.score)}`}
+        source={view.svg}
+        alt={`Claude crab game: ${view.game.mode}`}
         width={width}
         height={height}
       />
@@ -548,9 +766,11 @@ export const register: Register = (on, options) => {
   const ttlMs = (Number(options.cacheTtlMinutes) || 60) * 60000
   const buddy = String(options.buddy ?? 'game')
   S.costume = String(options.costume ?? 'auto')
+  S.classic = String(options.motion ?? 'smooth') === 'classic'
   on('session.start', async ($, e, next) => {
     await setHandoff($, 'idle')
     stopGameTimer()
+    S.run = null
     await update($, gameAtom, () => false)
     await update($, runAtom, () => null)
     try {
@@ -573,8 +793,14 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
+  // the same numbers again are not a reason to redraw the band
   on('session.measure', async ($, e, next) => {
-    await update($, usageAtom, () => toUsage(e.context, e.rateLimits, e.cost))
+    const usage = toUsage(e.context, e.rateLimits, e.cost)
+    const same = JSON.stringify(usage)
+    if (same !== S.usage) {
+      S.usage = same
+      await update($, usageAtom, () => usage)
+    }
 
     return next(e)
   })
@@ -592,13 +818,13 @@ export const register: Register = (on, options) => {
   // box behaves as ever. The first few edits while the game is open go to the trace, to show what
   // the box really hands over.
   on('prompt.edit', async ($, e, next) => {
-    const isKey = await isGameKey($, e)
+    const move = await gameKey($, e)
     if (S.logged < 12 && e.text === '' && (await read($, gameAtom))) {
       S.logged++
-      void trace($, `edit key=${JSON.stringify(e.key ?? null)} input=${JSON.stringify(e.inputText)} game=${isKey ? 'jump' : 'pass'}`)
+      void trace($, `edit key=${JSON.stringify(e.key ?? null)} input=${JSON.stringify(e.inputText)} game=${move ?? 'pass'}`)
     }
-    if (isKey) {
-      await pressKeys($)
+    if (move) {
+      await pressKeys($, move)
 
       return { text: e.text, cursor: e.cursor }
     }
@@ -628,7 +854,8 @@ export const register: Register = (on, options) => {
 
     if (verdict === 'jump') {
       S.ringAt = now
-      void pressJump($)
+      // a move onto Play is the click on Play arriving after the game opened, never a key
+      if (e.element !== 'play' || S.run?.mode === 'play') void press($, e.element === 'duck' ? 'duck' : 'jump', `ring:${e.element}`)
 
       return next({ ...e, element: KEYS })
     }
@@ -646,14 +873,14 @@ export const register: Register = (on, options) => {
   // the terminal runner posts its high score when a run ends; both games post a close when the
   // person presses q, and the desktop's guidance line posts each jump
   on('ui.message', async ($, e, next) => {
-    const data = e.data as { best?: unknown; close?: unknown; jump?: unknown; via?: unknown } | null
+    const data = e.data as { best?: unknown; close?: unknown; jump?: unknown; duck?: unknown; via?: unknown } | null
     if (data?.close === true) await closeGame($)
     if (data?.jump === true) {
       if (S.logged < 24) {
         S.logged++
         void trace($, `press via=${JSON.stringify(data.via ?? null)}`)
       }
-      await pressJump($)
+      await press($, data.duck === true ? 'duck' : 'jump', 'message')
     }
     if (typeof data?.best === 'number' && Number.isFinite(data.best)) await saveBest($, data.best)
 
@@ -665,6 +892,7 @@ export const register: Register = (on, options) => {
     if (e.id === GAME_PANE) {
       S.isPaneOpen = false
       stopGameTimer()
+      S.run = null
       await update($, gameAtom, () => false)
       await update($, runAtom, () => null)
     }
@@ -720,6 +948,7 @@ export const register: Register = (on, options) => {
     // the terminal's element table holds an empty Svg: only the other surfaces draw one
     if (e.surface !== 'terminal' && 'Svg' in els) {
       const run = await read($, runAtom)
+      drawn($, run, await $.clock.now())
 
       return run ? sceneView($, els, run, e.props.bodyColumns) : <Box />
     }
@@ -763,6 +992,7 @@ export const register: Register = (on, options) => {
     const wide = e.props.bodyColumns >= 100
     const working = e.props.isWorking
     S.bandRows = e.props.maxRows
+    S.cols = e.props.bodyColumns
     S.bandId = e.requestId
     if (!working && S.workTimer) stopBuddy()
     // a reload that brings no session.start still gets its timer and its line in the trace
@@ -860,20 +1090,28 @@ export const register: Register = (on, options) => {
 
     const slot = mascotOn ? (
       (() => {
-        const m = mascotParts(Math.max(0, now - (S.workStart || now)))
+        // while a run plays the band is left alone: the mascot holds still (and the clock with it)
+        const quiet = run?.game.mode === 'play'
+        const m = quiet ? null : mascotParts(Math.max(0, now - (S.workStart || now)))
         return (
           <Box key="buddy" width={BUDDY_WIDTH} flexShrink={0}>
             <Text color="claude" bold>
-              {m.glyph}
+              {m ? m.glyph : '✻'}
             </Text>
             <Text> </Text>
-            <Text dimColor>{m.pre}</Text>
-            <Text color="claude" bold>
-              {m.hot}
-            </Text>
-            <Text dimColor>{m.post}</Text>
-            <Text dimColor>{m.time}</Text>
-            <Text>{' '.repeat(Math.max(0, BUDDY_WIDTH - m.used))}</Text>
+            {m ? (
+              <Box>
+                <Text dimColor>{m.pre}</Text>
+                <Text color="claude" bold>
+                  {m.hot}
+                </Text>
+                <Text dimColor>{m.post}</Text>
+                <Text dimColor>{m.time}</Text>
+                <Text>{' '.repeat(Math.max(0, BUDDY_WIDTH - m.used))}</Text>
+              </Box>
+            ) : (
+              <Text dimColor>working…</Text>
+            )}
           </Box>
         )
       })()
@@ -898,6 +1136,7 @@ export const register: Register = (on, options) => {
     const isGameHere = gameOpen && canPlay && !S.isPaneOpen
     let game: JSX.Element | null = null
     if (isGameHere && isSvg && run) {
+      drawn($, run, now)
       game = <Box key="game-slot" marginTop={e.props.maxRows >= 2 + gameRows ? 1 : 0}>{sceneView($, els, run, e.props.bodyColumns)}</Box>
     } else if (isGameHere && Client) {
       game = (

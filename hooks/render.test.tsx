@@ -255,7 +255,7 @@ const typed = (key: string, text = '') => ({
   cursor: text.length,
   start: text.length,
   end: text.length,
-  inputText: key === 'up' ? '' : key,
+  inputText: key === 'up' || key === 'down' ? '' : key,
 })
 
 describe('game (terminal: half-block pixels in a Client)', () => {
@@ -433,19 +433,19 @@ describe('game (desktop: a vector scene, one line of guidance that takes the key
     const before = await svg(ui)
     await typeKey(ui, ' ')
     await clock.advance(40 * 12)
-    expect(await line(ui)).toMatch(/score 00\d\d/)
+    expect(await line(ui)).toMatch(/to jump/)
     expect(await svg(ui)).not.toBe(before)
 
     // never jumping: a bug reaches the crab
     await clock.advance(40 * 200)
     expect(await line(ui)).toMatch(/game over/)
     // belly up and grey: the crab is drawn rotated
-    expect(await svg(ui)).toContain('rotate(180')
+    expect(await svg(ui)).toContain('180 15 18')
 
     // a press retries; q closes it all
     await typeKey(ui, ' ')
     await clock.advance(40 * 3)
-    expect(await line(ui)).toMatch(/score 00/)
+    expect(await line(ui)).toMatch(/to jump/)
     await typeKey(ui, 'q')
     expect(await ui.find({ type: 'Svg' })).toBeUndefined()
     await ui.unmount()
@@ -467,7 +467,7 @@ describe('game (desktop: a vector scene, one line of guidance that takes the key
     const kept = await edit($, typed(' ') as never)
     expect(kept.text).toBe('')
     await clock.advance(40 * 5)
-    expect(await line(ui)).toMatch(/score 00/)
+    expect(await line(ui)).toMatch(/to jump/)
 
     // the up arrow is a jump now
     await edit($, typed('up') as never)
@@ -480,7 +480,7 @@ describe('game (desktop: a vector scene, one line of guidance that takes the key
     expect(await line(ui)).toMatch(/game over/)
     await edit($, typed(' ') as never)
     await clock.advance(40 * 3)
-    expect(await line(ui)).toMatch(/score 00/)
+    expect(await line(ui)).toMatch(/to jump/)
     await ui.unmount()
   })
 
@@ -508,7 +508,7 @@ describe('game (desktop: a vector scene, one line of guidance that takes the key
     expect((await edit($, typed('k') as never)).text).toBe('k')
     await edit($, typed(' ') as never)
     await clock.advance(40 * 4)
-    expect(await line(ui)).toMatch(/score 00/)
+    expect(await line(ui)).toMatch(/to jump/)
     // a live run: k is read, not typed
     expect((await edit($, typed('k') as never)).text).toBe('')
     // a draft is never touched
@@ -520,7 +520,7 @@ describe('game (desktop: a vector scene, one line of guidance that takes the key
     const { clock, ui } = await open($, on)
     await typeKey(ui, 'x')
     await clock.advance(40 * 4)
-    expect(await line(ui)).toMatch(/score 00/)
+    expect(await line(ui)).toMatch(/to jump/)
     await typeKey(ui, 'a')
     await ui.unmount()
   })
@@ -536,7 +536,7 @@ describe('game (desktop: a vector scene, one line of guidance that takes the key
     const { clock, ui } = await open($, on)
     await enter(ui)
     await clock.advance(40 * 4)
-    expect(await line(ui)).toMatch(/score 00/)
+    expect(await line(ui)).toMatch(/to jump/)
     await ui.unmount()
   })
 
@@ -553,7 +553,7 @@ describe('game (desktop: a vector scene, one line of guidance that takes the key
     const { clock, ui } = await open($, on)
     await ui.press({ key: 'jump' })
     await clock.advance(40 * 5)
-    expect(await line(ui)).toMatch(/score 00/)
+    expect(await line(ui)).toMatch(/to jump/)
     await ui.press({ key: 'jump' })
     await clock.advance(40)
     expect(await svg(ui)).toContain('<svg')
@@ -574,7 +574,7 @@ describe('game (desktop: a vector scene, one line of guidance that takes the key
     await clock.advance(600)
     await typeKey(ui, ' ')
     await clock.advance(40 * 3)
-    expect(await line(ui)).toMatch(/score 00/)
+    expect(await line(ui)).toMatch(/to jump/)
     await ui.unmount()
   })
 
@@ -612,14 +612,219 @@ describe('game (desktop: a vector scene, one line of guidance that takes the key
     await ui.unmount()
   })
 
+  test('while a run plays the picture is a plan the display moves, not a redraw at every step', async ($, on) => {
+    const { clock, ui } = await open($, on)
+    await typeKey(ui, ' ')
+    await clock.advance(40)
+    const plan = await svg(ui)
+    // a plan: the next 7.68 s of the run, every moving thing carried as animation
+    expect(plan).toContain('dur="7.68s"')
+    expect(plan).toContain('<animateTransform')
+
+    // twenty steps on, the picture is the same one (the display has been moving it), and so is the line:
+    // the score is counted inside the picture, so nothing in the band has to be redrawn
+    const lineBefore = await line(ui)
+    await clock.advance(40 * 20)
+    expect(await svg(ui)).toBe(plan)
+    expect(await line(ui)).toBe(lineBefore)
+
+    // a press changes the plan: the crab is now in the air
+    await typeKey(ui, ' ')
+    const jumped = await svg(ui)
+    expect(jumped).not.toBe(plan)
+    // pressing again in mid-air changes nothing, so nothing is redrawn
+    await clock.advance(40)
+    await typeKey(ui, ' ')
+    expect(await svg(ui)).toBe(jumped)
+    await ui.unmount()
+  })
+
+  test('a run at rest wakes the module only for what the plan says: it ends on time with nothing pressed', async ($, on) => {
+    const { clock, ui } = await open($, on)
+    await typeKey(ui, ' ')
+    const plan = await svg(ui)
+    let endedAt = 0
+    for (let t = 0; t < 7000 && !endedAt; t += 20) {
+      await clock.advance(20)
+      if (/game over/.test(await line(ui))) endedAt = t + 20
+    }
+    // the first bug reaches a standing crab after about 4 seconds, and the end shows within a step of it
+    expect(endedAt).toBeGreaterThan(3200)
+    expect(endedAt).toBeLessThan(4600)
+    // until then the picture was never replaced
+    expect(plan).toContain('dur="7.68s"')
+    await ui.unmount()
+  })
+
+  test('one key that arrives twice (the field and a hotkey) is one press', async ($, on) => {
+    const { clock, seen, ui } = await open($, on)
+    await typeKey(ui, ' ')
+    await clock.advance(40 * 3)
+    await typeKey(ui, 'k')
+    await ui.press({ key: 'jump' })
+    await clock.advance(40)
+    expect(seen.traced).toMatch(/press jump=-1->0/)
+    expect(seen.traced).toMatch(/press dropped\(repeat\) via=button/)
+    await ui.unmount()
+  })
+
+  test('only a key is a key: the field emptying, or a Backspace, is not a jump', async ($, on) => {
+    const { clock, seen, ui } = await open($, on)
+    await typeKey(ui, ' ')
+    await clock.advance(40 * 3)
+    await typeKey(ui, 'abc')
+    await clock.advance(300)
+    const before = (seen.traced.match(/ press /g) ?? []).length
+    await typeKey(ui, 'ab')
+    await typeKey(ui, '')
+    await clock.advance(300)
+    expect((seen.traced.match(/ press /g) ?? []).length).toBe(before)
+    await ui.unmount()
+  })
+
+  test('a redraw of the band by anything else answers with a plan from now, once', async ($, on) => {
+    const { clock, seen, ui } = await open($, on)
+    await typeKey(ui, ' ')
+    await clock.advance(1000)
+    const plan = await svg(ui)
+    await $.turn.complete({ answer: 'ok', durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer' } as never)
+    await clock.advance(10)
+    expect(seen.traced).toMatch(/redraw: plan renewed/)
+    expect(await svg(ui)).not.toBe(plan)
+    await ui.unmount()
+  })
+
+  test('every press is on the trace with where it came from', async ($, on) => {
+    const { clock, seen, ui } = await open($, on)
+    await typeKey(ui, ' ')
+    await clock.advance(200)
+    await ui.press({ key: 'duck' })
+    await clock.advance(200)
+    expect(seen.traced).toMatch(/press start via=field move=jump mode=ready/)
+    expect(seen.traced).toMatch(/press jump=-1->-1 duck=\d+ queued=false via=button move=duck/)
+    await ui.unmount()
+  })
+
+  test('soak: two minutes of random play never storms, never wedges, and always ends and restarts', async ($, on) => {
+    const { clock, seen, ui } = await open($, on)
+    let seed = 12345
+    const rnd = () => {
+      seed = (seed * 16807) % 2147483647
+
+      return seed / 2147483647
+    }
+    const sources = new Set<string>()
+    let presses = 0
+    let runs = 0
+    let wasOver = false
+    for (let t = 0; t < 120000; t += 20) {
+      await clock.advance(20)
+      const l = await line(ui)
+      const over = /game over/.test(l)
+      if (over && !wasOver) runs++
+      wasOver = over
+      sources.add(await svg(ui))
+      // a player that mashes now and then, from every road a key can take, and mostly gets it wrong
+      if (rnd() < 0.04) {
+        presses++
+        const road = rnd()
+        if (road < 0.35) await typeKey(ui, rnd() < 0.2 ? 'j' : rnd() < 0.5 ? 'k' : ' ')
+        else if (road < 0.55) await ui.press({ key: rnd() < 0.3 ? 'duck' : 'jump' })
+        else if (road < 0.8) await edit($, typed(rnd() < 0.2 ? 'down' : rnd() < 0.5 ? 'up' : ' ') as never)
+        else await enter(ui)
+      }
+    }
+    expect(runs).toBeGreaterThan(3)
+    // a picture is made for a press, a renewal or the end of a run, never for the clock alone
+    expect(sources.size).toBeLessThan(presses + runs * 3 + 60)
+    // (the kit has no site that holds a keyboard, so asking for one fails: that is the only failure there may be)
+    expect(seen.traced.split('\n').filter(t => /failed|Error/.test(t) && !/focus mount-\d+ try@\d+ failed/.test(t))).toEqual([])
+    await ui.unmount()
+  })
+
+  test('the plan starts part-way into a step, so the picture is right at its first moment', async ($, on) => {
+    const { clock, ui } = await open($, on)
+    await typeKey(ui, ' ')
+    await clock.advance(40 * 3 + 17)
+    await typeKey(ui, ' ')
+    // 17 ms into the step plus the lead the picture is drawn ahead by: not a whole step, not nothing
+    const begins = [...(await svg(ui)).matchAll(/begin="(-?[\d.]+)s"/g)].map(m => Number(m[1]))
+    expect(begins.some(b => b < 0 && b > -0.04)).toBe(true)
+    await ui.unmount()
+  })
+
+  test('the classic motion redraws at every step, as 0.10 did', { options: { motion: 'classic' } }, async ($, on) => {
+    const { clock, ui } = await open($, on)
+    await typeKey(ui, ' ')
+    await clock.advance(40)
+    const a = await svg(ui)
+    expect(a).not.toContain('dur="7.68s"')
+    await clock.advance(40)
+    expect(await svg(ui)).not.toBe(a)
+    await ui.unmount()
+  })
+
+  test('j, s and the down arrow duck; ▼ duck is a button of its own; k and space jump', async ($, on) => {
+    const { clock, ui } = await open($, on)
+    expect(await ui.find({ type: 'Button', key: 'duck' })).toMatchObject({ props: { hotkey: 'j' } })
+    await typeKey(ui, ' ')
+    await clock.advance(40 * 3)
+    expect(await svg(ui)).not.toContain('1.1 .5')
+
+    await typeKey(ui, 'j')
+    expect(await svg(ui)).toContain('1.1 .5')
+    await clock.advance(40 * 20)
+    // the duck is over: a plan with no duck in it
+    await typeKey(ui, 'x')
+    expect(await svg(ui)).not.toContain('1.1 .5')
+    await clock.advance(40 * 20)
+    await typeKey(ui, 's')
+    expect(await svg(ui)).toContain('1.1 .5')
+
+    // from the prompt box, while the run is live: the down arrow and j duck, and neither is typed
+    await clock.advance(40 * 30)
+    await ui.unmount()
+  })
+
+  test('the down arrow and j at an empty prompt box duck a live run, and are typing otherwise', async ($, on) => {
+    const { clock, ui } = await open($, on)
+    // waiting to start: j is typed as ever
+    expect((await edit($, typed('j') as never)).text).toBe('j')
+    await edit($, typed(' ') as never)
+    await clock.advance(40 * 4)
+    expect((await edit($, typed('down') as never)).text).toBe('')
+    expect(await svg(ui)).toContain('1.1 .5')
+    await clock.advance(40 * 20)
+    expect((await edit($, typed('j') as never)).text).toBe('')
+    expect((await edit($, typed('j', 'fix the bu') as never)).text).toBe('fix the buj')
+    await ui.unmount()
+  })
+
+  test('a run that ends is a still, with the crab flipped, and a retry is a new plan', async ($, on) => {
+    const { clock, ui } = await open($, on)
+    await typeKey(ui, ' ')
+    for (let i = 0; i < 300 && !/game over/.test(await line(ui)); i++) await clock.advance(40)
+    const over = await svg(ui)
+    expect(over).toContain('180 15 18')
+    expect(over).not.toContain('dur="7.68s"')
+    await clock.advance(700)
+    await typeKey(ui, ' ')
+    await clock.advance(40)
+    expect(await svg(ui)).toContain('dur="7.68s"')
+    await ui.unmount()
+  })
+
   for (const cols of [40, 100, 200]) {
-    test(`the picture follows the band width and keeps its shape (${cols} columns)`, async ($, on) => {
+    test(`the picture fills the band's width and keeps the field's shape (${cols} columns)`, async ($, on) => {
       const { ui } = await open($, on, 'desktop', { bodyColumns: cols })
-      const el = (await ui.find({ type: 'Svg' })) as { props?: { width?: number; height?: number } } | undefined
-      const { width = 0, height = 0 } = el?.props ?? {}
-      expect(width).toBeLessThanOrEqual(540)
-      expect(width).toBeGreaterThanOrEqual(150)
-      expect(Math.abs(width / height - 5)).toBeLessThan(0.05)
+      const el = (await ui.find({ type: 'Svg' })) as { props?: { width?: number; height?: number; source?: string } } | undefined
+      const { width = 0, height = 0, source = '' } = el?.props ?? {}
+      // as wide as the band is (a column is about 8.4 px), up to a limit
+      expect(width).toBe(Math.min(1000, Math.floor(cols * 8.4)))
+      const units = Number(/viewBox="0 0 (\d+) 72"/.exec(source)?.[1])
+      expect(units).toBeGreaterThanOrEqual(260)
+      expect(units).toBeLessThanOrEqual(520)
+      expect(Math.abs(width / height - units / 72)).toBeLessThan(0.1)
       await ui.unmount()
     })
   }
