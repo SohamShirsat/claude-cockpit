@@ -1,7 +1,7 @@
 {
   "name": "status-band",
-  "version": "0.4.3",
-  "description": "Compact text band above the prompt: context %, cache countdown, 5h/7d limits, one-click handoff, and a tokenless mascot + mini game while Claude works.",
+  "version": "0.6.0",
+  "description": "Compact text band above the prompt: context %, cache countdown, 5h/7d limits, one-click handoff, and a tokenless mascot and a Claude-crab runner game while Claude works.",
   "types": "./types/index.d.ts",
   "userConfig": {
     "cacheTtlMinutes": {
@@ -13,6 +13,22 @@
         "60"
       ],
       "default": "60"
+    },
+    "costume": {
+      "type": "string",
+      "title": "Game character",
+      "description": "Which Claude crab runs in the game: auto = a new costume every run, or pick one.",
+      "options": [
+        "auto",
+        "plain",
+        "astronaut",
+        "detective",
+        "engineer",
+        "chef",
+        "racer",
+        "pirate"
+      ],
+      "default": "auto"
     },
     "buddy": {
       "type": "string",

@@ -11,8 +11,9 @@ const handoffAtom = atom({ plugin: 'status-band', key: 'handoff' } as const, 'id
 const bestAtom = atom({ plugin: 'status-band', key: 'best' } as const, 0)
 const gameAtom = atom({ plugin: 'status-band', key: 'gameOpen' } as const, false)
 
-const VERSION = '0.4.3'
-const GAME_ROWS = 5
+const VERSION = '0.6.0'
+// header, the five rows of the field, the ground
+const GAME_ROWS = 7
 const GAME_PANE = 'status-band-runner'
 
 const baseName = (p: string) => p.slice(p.lastIndexOf('/') + 1)
@@ -274,6 +275,7 @@ async function toggleGame($: Dollar) {
 export const register: Register = (on, options) => {
   const ttlMs = (Number(options.cacheTtlMinutes) || 60) * 60000
   const buddy = String(options.buddy ?? 'game')
+  const costume = String(options.costume ?? 'auto')
   on('session.start', async ($, e, next) => {
     await setHandoff($, 'idle')
     await update($, gameAtom, () => false)
@@ -383,12 +385,12 @@ export const register: Register = (on, options) => {
         </Box>
       )
     }
-    const best = await read($, bestAtom)
+    const [best, now] = await Promise.all([read($, bestAtom), $.clock.now()])
     const cols = Math.max(30, Math.min(e.props.bodyColumns, 56))
 
     return (
       <Box>
-        <Client key={`runner-${cols}`} module="./runner.tsx" props={{ best, cols }} width={cols} />
+        <Client key={`runner-${cols}`} module="./runner.tsx" props={{ best, cols, costume, start: Math.floor(now / 60000) }} width={cols} />
       </Box>
     )
   })
@@ -544,7 +546,7 @@ export const register: Register = (on, options) => {
     const game =
       isGameHere && Client ? (
         <Box key="game" marginTop={e.props.maxRows >= 2 + GAME_ROWS ? 1 : 0}>
-          <Client key={`runner-${gameCols}`} module="./runner.tsx" props={{ best, cols: gameCols }} width={gameCols} />
+          <Client key={`runner-${gameCols}`} module="./runner.tsx" props={{ best, cols: gameCols, costume, start: Math.floor(now / 60000) }} width={gameCols} />
         </Box>
       ) : null
 

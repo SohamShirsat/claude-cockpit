@@ -293,16 +293,50 @@ describe('game', () => {
     })
   }
 
+  for (const surface of SURFACES) {
+    test(`the runner is the crab, wearing the costume that was asked for (${surface})`, async ($, on) => {
+      world(on as never, '/work/none', [])
+      const ui = await band($, surface, { isWorking: true, bodyColumns: 100 })
+      await ui.press({ key: 'play' })
+      const inRunner = (text: RegExp) => ui.find({ type: 'Text', text, in: 'runner-56' } as never)
+
+      // the clock reads 0, so the auto setting starts on the plain crab: clay body in half blocks
+      expect(await inRunner(/plain · best/)).toBeDefined()
+      expect(await inRunner(/[▀▄█]/)).toMatchObject({ props: { color: '#D97757' } })
+      expect(await inRunner(/[✻✕]/)).toBeDefined()
+      await ui.press({ key: 'play' })
+      await ui.unmount()
+    })
+  }
+
+  test('a costume picked in the settings is the one that runs, and it stays through retries', { options: { costume: 'chef' } }, async ($, on) => {
+    world(on as never, '/work/none', [])
+    const ui = await band($, 'terminal', { isWorking: true, bodyColumns: 100 })
+    await ui.press({ key: 'play' })
+    const inRunner = (text: RegExp) => ui.find({ type: 'Text', text, in: 'runner-56' } as never)
+    expect(await inRunner(/chef · best/)).toBeDefined()
+
+    await ui.key({ key: ' ', in: 'runner-56' } as never)
+    await ui.advance(100 * 90)
+    expect(await inRunner(/game over/)).toBeDefined()
+    await ui.key({ key: ' ', in: 'runner-56' } as never)
+    await ui.advance(100)
+    expect(await inRunner(/score/)).toBeDefined()
+    await ui.key({ key: 'q', in: 'runner-56' } as never)
+    await ui.unmount()
+  })
+
   test('a well-timed jump clears the first obstacle', async ($, on) => {
     world(on as never, '/work/none', [])
     const ui = await band($, 'terminal', { isWorking: true, bodyColumns: 100 })
     const runner = (text: RegExp) => ui.find({ type: 'Text', text, in: 'runner-56' } as never)
     await ui.press({ key: 'play' })
     await ui.key({ key: ' ', in: 'runner-56' } as never)
-    // obstacle spawns at tick 12 at column 55 and reaches the runner (col 4) 51 ticks later
-    await ui.advance(100 * 59)
+    // obstacle spawns at tick 12 at column 55 and reaches the crab's body (col 5) 50 ticks later;
+    // the jump has the crab two pixels up from its second tick to its eighth
+    await ui.advance(100 * 56)
     await ui.key({ key: 'up', in: 'runner-56' } as never)
-    await ui.advance(100 * 8)
+    await ui.advance(100 * 12)
     expect(await runner(/game over/)).toBeUndefined()
     expect(await runner(/score/)).toBeDefined()
     await ui.press({ key: 'play' })
