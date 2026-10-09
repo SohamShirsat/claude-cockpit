@@ -19,7 +19,6 @@ const BUG_TOP = '#E8786B'
 const BIG = '#3B9C5F'
 const BIG_TOP = '#6CC58A'
 const CLOUD = '#9CCBF2'
-const JUMP_KEYS = new Set([' ', 'space', 'up', 'w', 'k', 'return'])
 
 // The field as pixels, top row first: the clouds, the bugs, then the crab on top of them.
 const field = ({ game: g, cfg }: St): Frame => {
@@ -79,7 +78,7 @@ const Runner: ClientModule<Props, St> = (props, surface) => {
     surface.onKey(ev => {
       // q hands the close to the hooks module, which owns whether the game is open
       if (ev.key === 'q') surface.post({ close: true })
-      else if (JUMP_KEYS.has(ev.key)) press()
+      else if (!ev.ctrl && !ev.meta) press()
     })
     surface.onPointer(ev => {
       if (ev.type === 'down') press()

@@ -16,7 +16,7 @@ const runAtom = atom({ plugin: 'status-band', key: 'game' } as const, null)
 // the terminal's game lives in its Client: each press of the prompt's keys bumps this, and the Client acts on a change
 const signalAtom = atom({ plugin: 'status-band', key: 'jumpSignal' } as const, 0)
 
-const VERSION = '0.8.0'
+const VERSION = '0.9.0'
 // rows the game takes: the terminal's is a header, the five rows of the field and the ground;
 // the desktop's the one line of guidance (which is also the click target) and the picture (108 px)
 const GAME_ROWS = { text: 7, svg: 7 } as const
@@ -25,6 +25,8 @@ const MAX_CATCHUP = 4
 const SCENE_PX_PER_COL = 7.6
 const SCENE_MAX_WIDTH = 540
 const GAME_PANE = 'status-band-runner'
+// the desktop's key sink: a native text field that takes every printable key while it has the focus
+const KEYS = 'keys'
 
 const baseName = (p: string) => p.slice(p.lastIndexOf('/') + 1)
 const dirName = (p: string) => p.slice(0, p.lastIndexOf('/')) || '/'
@@ -102,6 +104,8 @@ const S = {
   costume: 'auto',
   gameSurface: 'text' as 'text' | 'svg',
   dims: new Set<string>(),
+  bandId: '',
+  refocus: false,
 }
 
 // small trace file for debugging what the band was asked to draw: ~/.claude/status-band-trace.log
@@ -327,7 +331,7 @@ async function pressJump($: Dollar) {
 // the keys that play, read at the prompt box: it owns the keyboard, so a key reaches a game that
 // was never clicked only this way. Space and ↑ always; k only while a run is live, so a draft that
 // starts with k is never in the way while the game waits. Only an empty box is ever touched.
-const SPACE_KEYS = new Set([' ', 'space', 'up'])
+const SPACE_KEYS = new Set([' ', 'space', 'up', 'down', 'w'])
 
 async function isGameKey($: Dollar, e: { text: string; inputText: string; key?: { key: string; ctrl?: true; meta?: true } }) {
   if (e.text !== '' || e.key?.ctrl || e.key?.meta) return false
@@ -344,6 +348,32 @@ async function isGameKey($: Dollar, e: { text: string; inputText: string; key?: 
 async function pressKeys($: Dollar) {
   if (S.gameSurface === 'svg') await pressJump($)
   else await update($, signalAtom, n => (n ?? 0) + 1)
+}
+
+// the game takes the keyboard: the desktop's key field is given the focus ring, so Space, the
+// arrows and the rest reach it without a click on it first. The keyboard is the person's to give,
+// so the answer (and why not) goes to the trace.
+async function focusGame($: Dollar) {
+  if (S.gameSurface !== 'svg') return
+  const id = S.isPaneOpen ? GAME_PANE : S.bandId
+  if (!id) return
+  try {
+    const r = await $.ui.focus({ requestId: id, key: KEYS })
+    void trace($, `focus ${id} ${r.deny ? `denied: ${r.deny}` : 'ok'}`)
+  } catch (err) {
+    void trace($, `focus ${id} failed: ${String(err)}`)
+  }
+}
+
+// every key the key field takes: q closes the game, anything else plays
+async function typedKeys($: Dollar, text: string) {
+  if (!text) return
+  if (S.logged < 24) {
+    S.logged++
+    void trace($, `press via=input ${JSON.stringify(text)}`)
+  }
+  if (text.trim().toLowerCase().endsWith('q')) await closeGame($)
+  else await pressJump($)
 }
 
 async function closeGame($: Dollar) {
@@ -371,7 +401,7 @@ async function toggleGame($: Dollar, isSvg: boolean) {
   if (S.bandRows < 1 + rows) {
     let isPlaced = false
     try {
-      isPlaced = (await $.ui.open({ id: GAME_PANE, title: 'Claude runner', rows: rows + 1 })).isPlaced
+      isPlaced = (await $.ui.open({ id: GAME_PANE, title: 'Claude runner', rows: rows + 1, focus: true, closeOnEscape: true })).isPlaced
     } catch {
       isPlaced = false
     }
@@ -384,6 +414,8 @@ async function toggleGame($: Dollar, isSvg: boolean) {
   const [best, now] = await Promise.all([read($, bestAtom), $.clock.now()])
   await update($, runAtom, () => fresh(best, 1 + (now % 99991), 'ready', lookFor(S.costume, Math.floor(now / 60000)), deskConfig))
   await update($, gameAtom, () => true)
+  // Play was a click in the band: hand the keyboard to the game's key field once it is drawn
+  await focusGame($)
 }
 
 type VectorEls = Elements['desktop'] | Elements['vscode'] | Elements['mobile']
@@ -393,15 +425,29 @@ type VectorEls = Elements['desktop'] | Elements['vscode'] | Elements['mobile']
 // text, with a jump button under the picture
 function sceneView($: Dollar, els: VectorEls, surface: string, run: Game, bodyColumns: number) {
   const { Box, Button, Svg, Text } = els
-  // only the desktop takes a Client's keys; the others' tables may hold a stub of one
-  const Client = surface === 'desktop' && 'Client' in els ? els.Client : null
+  // the desktop's guidance line is a native text field: it takes the focus ring (so Play can hand it
+  // the keyboard), every printable key reaches it, and Enter plays. Failing that, a `Client` that
+  // reads keys after a click; failing that, plain text with a jump button under the picture.
+  const Input = surface === 'desktop' && 'Input' in els ? els.Input : null
+  const Client = !Input && surface === 'desktop' && 'Client' in els ? els.Client : null
   const width = Math.max(150, Math.min(SCENE_MAX_WIDTH, Math.floor(bodyColumns * SCENE_PX_PER_COL)))
   const height = Math.round(width / 5)
-  const line = header(run)
+  const line = header(run, Input ? 'any key' : undefined)
 
   return (
     <Box key="game" flexDirection="column">
-      {Client ? (
+      {Input ? (
+        <Input
+          key={KEYS}
+          label="✻"
+          placeholder={line.trim()}
+          value=""
+          submitLabel="jump"
+          autoFocus
+          onInput={text => void typedKeys($, text)}
+          onSubmit={() => void pressJump($)}
+        />
+      ) : Client ? (
         <Client key="strip" module="./strip.tsx" props={{ text: line }} width={Math.min(bodyColumns, 62)} />
       ) : (
         <Box>
@@ -418,7 +464,7 @@ function sceneView($: Dollar, els: VectorEls, surface: string, run: Game, bodyCo
         width={width}
         height={height}
       />
-      {Client ? null : <Button key="jump" label="jump" hotkey="k" plain onPress={() => pressJump($)} />}
+      {Input || Client ? null : <Button key="jump" label="jump" hotkey="k" plain onPress={() => pressJump($)} />}
     </Box>
   )
 }
@@ -483,6 +529,29 @@ export const register: Register = (on, options) => {
     }
 
     return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // the arrows and Tab move the focus ring instead of typing: while the game is open that is a key
+  // for the game. It plays, and the ring goes back to the key field, so the next Space is the game's
+  // and never a press on Play or Handoff.
+  on('ui.focus', async ($, e, next) => {
+    if (e.origin.kind !== 'person' || e.element === KEYS || S.gameSurface !== 'svg' || !(await read($, gameAtom))) return next(e)
+    const moved = await next(e)
+    if (S.logged < 24) {
+      S.logged++
+      void trace($, `press via=ring ${e.element ?? 'engine'}`)
+    }
+    if (e.element !== 'play') await pressJump($)
+    if (!S.refocus) {
+      S.refocus = true
+      try {
+        await focusGame($)
+      } finally {
+        S.refocus = false
+      }
+    }
+
+    return moved
   }).catch(($, e, next) => next(e))
 
   // the terminal runner posts its high score when a run ends; both games post a close when the
@@ -598,6 +667,7 @@ export const register: Register = (on, options) => {
     const wide = e.props.bodyColumns >= 100
     const working = e.props.isWorking
     S.bandRows = e.props.maxRows
+    S.bandId = e.requestId
     if (!working && S.workTimer) stopBuddy()
     // a reload that brings no session.start still gets its timer and its line in the trace
     startTicking($)

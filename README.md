@@ -47,16 +47,24 @@ Set them from the plugin's settings in Claude Code (`userConfig`):
 
 | | |
 | --- | --- |
-| **Jump** | `Space` or `↑` with an **empty prompt box** (no click needed); `k` also jumps while a run is live; or click the guidance line above the picture, then `Space` / `↑` / `k` |
-| **Start / retry** | the same keys, or click the guidance line |
-| **Close** | `q` (after clicking the guidance line), or the **■ close** button in the band |
+| **Jump** | **any key**. Pressing ▶ play puts the keyboard on the game (desktop: the guidance line is a focused text field; Esc gives the keys back to the prompt). Terminal: `Space` / `↑` with an empty prompt box, or any key after a click on the game |
+| **Start / retry** | the same keys, `Enter`, or a click on the guidance line |
+| **Close** | `q`, or the **■ close** button in the band |
 | **Clouds** | float in the air; reach one in a jump for **+25** and a sparkle |
 | **Bugs** | ladybugs and (later in a run) big green beetles; touching one ends the run |
 | **Score** | runs up while you survive; speeds up smoothly the longer you last; best score is kept between sessions |
 
-Typing is never hijacked: the keys only play when the game is open **and the prompt box is empty**. Once you have started a draft, Space is a space again.
+Your prompt is never hijacked: on the desktop the keys go to the game only while the game's own field has the focus (press Esc, or click the prompt, to type again); in the terminal they only play when the game is open **and the prompt box is empty**.
 
 ![The seven costumes](docs/costumes.png)
+
+## What changed in 0.9.0
+
+Keys on the desktop finally reach the game. The prompt box owns the keyboard there and the old route (`prompt.edit`) never fires, so Space / arrows did nothing unless you had first clicked the thin guidance line. Now:
+
+- ▶ play moves the focus ring onto the guidance line, which is a native text field (`Input`): every printable key, `Enter`, and the arrows / Tab (which move the ring and are caught by a `ui.focus` hook) play. `q` closes.
+- Any key but `q` plays in the terminal runner and in the click-focused `Client` fallback too.
+- If the focus is refused, the reason is written to `~/.claude/status-band-trace.log` (`focus … denied: …`).
 
 ## What changed in 0.8.0
 
@@ -95,10 +103,11 @@ One pure function, `step(game, config)`, advances a run one tick; no timers, no 
 
 ### Keys: how they reach the game
 
-The prompt box owns the keyboard, and a plugin drawing surface only gets keys after a click on it. So there are two routes:
+The prompt box owns the keyboard, and a plugin drawing surface only gets keys while it holds the focus. Routes:
 
+0. **Desktop key field** (`hooks/register.tsx`, `sceneView`): the guidance line is an `Input`. Play calls `$.ui.focus` on it (`focusGame`); its `onInput` is every key, `onSubmit` is Enter, and a `ui.focus` hook turns arrow / Tab ring moves into a jump and puts the ring back.
 1. **`prompt.edit` hook** (`hooks/register.tsx`): while the game is open and the box is empty, Space/↑ (and `k` while a run is live) are consumed there and turned into a jump. Any other key, or any non-empty draft, passes through untouched.
-2. **A `Client` surface module** (`hooks/strip.tsx`): the guidance line. A click on it jumps and gives it the keyboard; it then reads Space / ↑ / `k` / `q` itself and posts them to the hooks module (`ui.message`).
+2. **A `Client` surface module** (`hooks/strip.tsx`), used only where the surface has no `Input`: a click gives it the keyboard; it then reads every key (`q` closes) and posts them to the hooks module (`ui.message`).
 
 All presses go through one atomic `update` on the shared game state, so a key and a timer tick that land together both count.
 
@@ -123,7 +132,7 @@ types/index.d.ts              the plugin's state contract
 ## Troubleshooting
 
 - **Nothing changed after updating:** start a *new* session. Sessions pin the plugin version they started with.
-- **Space / ↑ do nothing:** click the guidance line above the picture once, then try again. Also look at `~/.claude/status-band-trace.log`: it names the loaded version (`session.start vX.Y.Z`) and, while a game is open, logs the first few key edits (`edit key=…`) and presses (`press via=…`), which shows whether the key reached the plugin at all. Open an issue with those lines.
+- **Keys do nothing:** click the guidance line above the picture once, then try again. Also look at `~/.claude/status-band-trace.log`: it names the loaded version (`session.start vX.Y.Z`) and, while a game is open, logs the first few key edits (`edit key=…`), focus attempts (`focus …`) and presses (`press via=input|ring|…`), which shows whether the key reached the plugin at all. Open an issue with those lines.
 - **"No room for the game here":** the window is too short; make it taller (the game needs 7 rows).
 - **Play button missing:** the band needs at least 30 columns, and `buddy` must be `game`.
 

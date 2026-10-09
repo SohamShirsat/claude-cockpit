@@ -231,9 +231,9 @@ export const act = (g: Game, cfg: Config): Game => {
 const num = (n: number) => String(Math.floor(n)).padStart(4, '0')
 
 /** The one line of guidance above the field: what to do, the score, and the key to press. */
-export const header = (g: Game): string => {
-  if (g.mode === 'play') return ` score ${num(g.score)} · ☁ ${g.grabbed} · best ${num(g.best)} · space / ↑ to jump`
-  if (g.mode === 'over') return ` game over ${num(g.score)} · ☁ ${g.grabbed} · best ${num(g.best)} · space / ↑ to retry`
+export const header = (g: Game, keys = 'space / ↑'): string => {
+  if (g.mode === 'play') return ` score ${num(g.score)} · ☁ ${g.grabbed} · best ${num(g.best)} · ${keys} to jump`
+  if (g.mode === 'over') return ` game over ${num(g.score)} · ☁ ${g.grabbed} · best ${num(g.best)} · ${keys} to retry`
 
-  return ` ${g.costume} · grab ☁, dodge bugs · space / ↑ to start`
+  return ` ${g.costume} · grab ☁, dodge bugs · ${keys} to start`
 }

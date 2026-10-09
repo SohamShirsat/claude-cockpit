@@ -7,7 +7,6 @@ import type { ClientModule } from 'claude-code'
 
 type Props = { text?: string } | null
 
-const JUMP_KEYS = new Set([' ', 'space', 'up', 'w', 'k', 'return'])
 
 const Strip: ClientModule<Props, boolean> = (props, surface) => {
   const { Box, Text } = surface.elements
@@ -15,7 +14,7 @@ const Strip: ClientModule<Props, boolean> = (props, surface) => {
   if (surface.state === undefined) {
     surface.onKey(ev => {
       if (ev.key === 'q') surface.post({ close: true })
-      else if (JUMP_KEYS.has(ev.key)) surface.post({ jump: true, via: ev.key })
+      else if (!ev.ctrl && !ev.meta) surface.post({ jump: true, via: ev.key })
     })
     surface.onPointer(ev => {
       if (ev.type === 'down') surface.post({ jump: true, via: 'click' })
