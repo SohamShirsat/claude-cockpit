@@ -1,7 +1,7 @@
 {
   "name": "status-band",
-  "version": "0.11.1",
-  "description": "Compact text band above the prompt: context %, cache countdown, 5h/7d limits, one-click handoff, and a tokenless mascot and a Claude-crab runner game while Claude works.",
+  "version": "0.12.0",
+  "description": "Claude Cockpit: a dashboard above the prompt with context %, cache countdown, 5-hour and weekly limits, one-click Handoff to a fresh chat, and a tokenless mascot and bug-fixing crab game while Claude works.",
   "types": "./types/index.d.ts",
   "userConfig": {
     "cacheTtlMinutes": {
@@ -54,5 +54,17 @@
   },
   "author": {
     "name": "Soham"
-  }
+  },
+  "repository": "https://github.com/SohamShirsat/claude-cockpit",
+  "homepage": "https://github.com/SohamShirsat/claude-cockpit",
+  "license": "MIT",
+  "keywords": [
+    "statusline",
+    "dashboard",
+    "context",
+    "cache",
+    "usage-limits",
+    "handoff",
+    "game"
+  ]
 }

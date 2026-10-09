@@ -1,6 +1,6 @@
 {
-  "name": "soham-mods",
-  "description": "Community mods for Claude Code by Soham.",
+  "name": "claude-cockpit",
+  "description": "Claude Cockpit: a small dashboard for Claude Code (context, cache, usage windows, one-click handoff) with a tiny game inside.",
   "owner": {
     "name": "Soham"
   },
@@ -8,7 +8,7 @@
     {
       "name": "status-band",
       "source": "./",
-      "description": "Compact band above the prompt: context %, cache, limits, handoff, plus a tokenless mascot and a grab-the-clouds, dodge-the-bugs game while Claude works."
+      "description": "A compact dashboard above the prompt: context %, cache countdown, 5-hour and weekly limits, one-click Handoff to a fresh chat, plus a tokenless mascot and a bug-fixing crab game while Claude works."
     }
   ]
 }
