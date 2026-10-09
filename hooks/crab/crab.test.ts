@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import { COSTUMES, GRID, layers, paintOrder, toSvg } from './master'
-import { act, deskConfig, fresh, lookFor, ROTATION, step, termConfig } from './game'
+import { act, deskConfig, fresh, header, lookFor, ROTATION, step, termConfig } from './game'
 import type { Config, Game } from './game'
 import { ARC, HIT, MINI_W, miniFrame, miniHeight, toCells, toRuns } from './mini'
 import { sceneSvg, SCENE, topOf } from './scene'
@@ -66,7 +66,7 @@ describe('game-size sprites', () => {
     }
   })
 
-  test('a jump never lifts the crab past the field, and clears the tall rock', () => {
+  test('a jump never lifts the crab past the field, and clears the tall bug', () => {
     const tallest = Math.max(...COSTUMES.map(c => miniHeight(c.id)))
     expect(tallest + Math.max(...ARC)).toBeLessThanOrEqual(10)
     expect(Math.max(...ARC)).toBeGreaterThanOrEqual(3)
@@ -93,12 +93,12 @@ describe('game-size sprites', () => {
   })
 })
 
-// a player that jumps as a rock comes within reach
+// a player that jumps as a bug comes within reach (about six ticks before it arrives)
 const play = (cfg: Config, ticks: number, look: Parameters<typeof fresh>[3], skill = true): Game => {
   let g = act(fresh(0, 99, 'ready', look, cfg), cfg)
   for (let i = 0; i < ticks && g.mode === 'play'; i++) {
     const speed = cfg.speed(g.score)
-    const reach = cfg.arc.length * speed * 0.3
+    const reach = 6 * speed
     const next = g.obs.find(o => o.x + o.w > cfg.crabX + cfg.hit[0])
     if (skill && next && g.jump < 0 && next.x - (cfg.crabX + cfg.hit[1]) <= reach) g = act(g, cfg)
     g = step(g, cfg)
@@ -109,22 +109,23 @@ const play = (cfg: Config, ticks: number, look: Parameters<typeof fresh>[3], ski
 
 describe('game rules', () => {
   for (const [name, cfg] of [['terminal', termConfig(56)], ['desktop', deskConfig]] as const) {
-    test(`${name}: standing still ends the run, and the first rock does it`, () => {
+    test(`${name}: standing still ends the run, and the first bug does it`, () => {
       const g = play(cfg, 400, lookFor('plain', 0), false)
       expect(g.mode).toBe('over')
       expect(g.best).toBeGreaterThan(0)
       expect(g.score).toBeLessThan(150)
     })
 
-    test(`${name}: every rock and cactus can be jumped, at every speed it reaches`, () => {
-      // a long run of well-timed jumps never dies: the arc clears the tallest obstacle with room to spare
+    test(`${name}: every bug, small and big, can be jumped, at every speed it reaches`, () => {
+      // a long run of well-timed jumps never dies: the arc clears the tallest bug with room to spare
       const g = play(cfg, 6000, lookFor('plain', 0))
       expect(g.mode).toBe('play')
-      expect(g.score).toBeGreaterThanOrEqual(6000)
+      expect(g.tick).toBeGreaterThanOrEqual(6000)
+      expect(g.score).toBeGreaterThanOrEqual(6000 * cfg.perTick)
       expect(cfg.speed(g.score)).toBe(cfg.speed(99999))
     })
 
-    test(`${name}: obstacles start off the field's right edge and are dropped once they pass`, () => {
+    test(`${name}: bugs start off the field's right edge and are dropped once they pass`, () => {
       let g = act(fresh(0, 5, 'ready', lookFor('plain', 0), cfg), cfg)
       const seen = new Set<number>()
       for (let i = 0; i < 400 && g.mode === 'play'; i++) {
@@ -163,13 +164,21 @@ describe('game rules', () => {
 describe('desktop scene', () => {
   test('every costume draws a standalone svg on the ground, in the scene box', () => {
     for (const costume of ROTATION) {
-      const g = { ...fresh(0, 3, 'play', lookFor(costume, 0), deskConfig), tick: 5, obs: [{ x: 200, w: 8, h: 18, tall: true }, { x: 280, w: 12, h: 9, tall: false }] }
+      const g = {
+        ...fresh(0, 3, 'play', lookFor(costume, 0), deskConfig),
+        tick: 5,
+        obs: [{ x: 200, w: 12, h: 13, tall: true }, { x: 280, w: 12, h: 9, tall: false }],
+        clouds: [{ x: 120, w: 16, h: 40 }],
+        pops: [{ x: 90, h: 40, age: 2 }],
+      }
       const svg = sceneSvg(g, deskConfig, { width: 540, height: 108 })
       expect(svg.startsWith('<svg')).toBe(true)
       expect(svg).toContain(`viewBox="0 0 ${SCENE.w} ${SCENE.h}"`)
       expect(svg).toContain('#D97757')
       expect(svg).toContain('#3B9C5F')
-      expect(svg).toContain('#8E929A')
+      expect(svg).toContain('#C0392B')
+      expect(svg).toContain('#9CCBF2')
+      expect(svg).toContain('#F5C542')
       expect(svg.length).toBeLessThan(20000)
     }
   })
@@ -188,5 +197,86 @@ describe('desktop scene', () => {
     const g = fresh(0, 3, 'over', lookFor('plain', 0), deskConfig)
     expect(sceneSvg(g, deskConfig, { width: 540, height: 108 })).toContain('rotate(180 15 18)')
     expect(sceneSvg({ ...g, mode: 'play' }, deskConfig, { width: 540, height: 108 })).not.toContain('rotate(180')
+  })
+})
+
+describe('clouds and bugs', () => {
+  const live = (cfg: Config) => act(fresh(0, 9, 'ready', lookFor('plain', 0), cfg), cfg)
+
+  for (const [name, cfg] of [['terminal', termConfig(56)], ['desktop', deskConfig]] as const) {
+    test(`${name}: reaching a cloud in a jump grabs it, scores it, and sparkles; the ground cannot`, () => {
+      const cloud = { x: cfg.crabX + cfg.reach[0] + 6, w: cfg.cloud.w, h: cfg.cloud.h(0) }
+      // on the ground the crab cannot reach it: the cloud goes by
+      let low = { ...live(cfg), clouds: [cloud] }
+      for (let i = 0; i < 40; i++) low = { ...step(low, cfg), obs: [] }
+      expect(low.grabbed).toBe(0)
+
+      // at the top of the jump it can
+      let up = { ...live(cfg), clouds: [cloud], y: Math.max(...cfg.arc), jump: Math.floor(cfg.arc.length / 2) }
+      const before = up.score
+      up = step(up, cfg)
+      expect(up.grabbed).toBe(1)
+      expect(up.clouds).toHaveLength(0)
+      expect(up.pops).toHaveLength(1)
+      expect(up.score).toBeGreaterThanOrEqual(before + cfg.cloudPoints)
+    })
+
+    test(`${name}: clouds keep coming, and sparkles die out`, () => {
+      let g = live(cfg)
+      const seen = new Set<number>()
+      for (let i = 0; i < 1500 && g.mode === 'play'; i++) {
+        g = { ...step(g, cfg), obs: [] }
+        for (const c of g.clouds) {
+          seen.add(c.h)
+          expect(c.h).toBeGreaterThan(cfg.crabH)
+        }
+        expect(g.pops.length).toBeLessThanOrEqual(1)
+      }
+      expect(g.mode).toBe('play')
+      expect(g.tick).toBe(1500)
+      expect(seen.size).toBeGreaterThanOrEqual(1)
+    })
+
+    test(`${name}: a press just before landing is kept, and jumps the moment the crab is down`, () => {
+      let g = live(cfg)
+      g = { ...g, obs: [] }
+      g = act(g, cfg)
+      for (let i = 0; i < cfg.arc.length - 3; i++) g = { ...step(g, cfg), obs: [] }
+      expect(g.jump).toBeGreaterThanOrEqual(0)
+      g = act(g, cfg)
+      expect(g.queued).toBe(true)
+      for (let i = 0; i < 6 && g.queued; i++) g = { ...step(g, cfg), obs: [] }
+      expect(g.queued).toBe(false)
+      expect(g.jump).toBeGreaterThanOrEqual(0)
+    })
+  }
+
+  test('a press far from landing is not queued', () => {
+    const g = act(act(live(deskConfig), deskConfig), deskConfig)
+    expect(g.queued).toBe(false)
+  })
+
+  test('the desktop runs faster than before, in small steps, and quickens smoothly', () => {
+    expect(deskConfig.tickMs).toBeLessThanOrEqual(40)
+    // units a second: it was 57 at the start and 114 at the top
+    expect((deskConfig.speed(0) * 1000) / deskConfig.tickMs).toBeGreaterThanOrEqual(70)
+    expect(deskConfig.speed(Number.MAX_SAFE_INTEGER)).toBeLessThanOrEqual(6)
+    let last = deskConfig.speed(0)
+    for (let score = 0; score < 3000; score += 10) {
+      const v = deskConfig.speed(score)
+      expect(v - last).toBeLessThan(0.05)
+      expect(v).toBeGreaterThanOrEqual(last)
+      last = v
+    }
+    // the jump is a smooth rise and fall
+    const arc = deskConfig.arc
+    for (let i = 1; i < arc.length; i++) expect(Math.abs((arc[i] ?? 0) - (arc[i - 1] ?? 0))).toBeLessThan(7)
+  })
+
+  test('the one line of guidance carries the score, the clouds grabbed, and the keys', () => {
+    const g = fresh(377, 3, 'play', lookFor('plain', 0), deskConfig)
+    expect(header({ ...g, score: 95.6, grabbed: 2 })).toBe(' score 0095 · ☁ 2 · best 0377 · space / ↑ to jump')
+    expect(header({ ...g, mode: 'over', score: 95.6, grabbed: 2 })).toBe(' game over 0095 · ☁ 2 · best 0377 · space / ↑ to retry')
+    expect(header({ ...g, mode: 'ready' })).toContain('space / ↑ to start')
   })
 })

@@ -16,10 +16,12 @@ const runAtom = atom({ plugin: 'status-band', key: 'game' } as const, null)
 // the terminal's game lives in its Client: each press of the prompt's keys bumps this, and the Client acts on a change
 const signalAtom = atom({ plugin: 'status-band', key: 'jumpSignal' } as const, 0)
 
-const VERSION = '0.7.1'
+const VERSION = '0.8.0'
 // rows the game takes: the terminal's is a header, the five rows of the field and the ground;
-// the desktop's a header, the picture (108 px) and the key strip
-const GAME_ROWS = { text: 7, svg: 8 } as const
+// the desktop's the one line of guidance (which is also the click target) and the picture (108 px)
+const GAME_ROWS = { text: 7, svg: 7 } as const
+// a tick that comes late runs the steps it owes (up to this many), so the speed stays true
+const MAX_CATCHUP = 4
 const SCENE_PX_PER_COL = 7.6
 const SCENE_MAX_WIDTH = 540
 const GAME_PANE = 'status-band-runner'
@@ -94,6 +96,9 @@ const S = {
   isPaneOpen: false,
   gameTimer: null as { cancel: () => void } | null,
   isGameBusy: false,
+  lastTick: 0,
+  owed: 0,
+  logged: 0,
   costume: 'auto',
   gameSurface: 'text' as 'text' | 'svg',
   dims: new Set<string>(),
@@ -268,19 +273,34 @@ async function saveBest($: Dollar, score: number) {
 }
 
 // the desktop's game: the hooks module owns the run and steps it on a timer while it is live;
-// the picture is drawn from it (hooks/crab/scene.ts) and the key strip only reports presses
+// the picture is drawn from it (hooks/crab/scene.ts) and the guidance line only reports presses.
+// Every change to the run goes through `update`, so a press and a tick that land together both count.
 async function tickGame($: Dollar) {
   if (S.isGameBusy) return
   S.isGameBusy = true
   try {
-    const g = await read($, runAtom)
-    if (!g || g.mode !== 'play') {
+    const live = await read($, runAtom)
+    if (!live || live.mode !== 'play') {
       stopGameTimer()
       return
     }
-    const next = step(g, deskConfig)
-    await update($, runAtom, () => next)
-    if (next.mode === 'over') {
+    // the steps owed since the last tick: one when the timer is on time, more when a frame ran long
+    const now = await $.clock.now()
+    const ms = deskConfig.tickMs
+    const elapsed = S.lastTick === 0 || now <= S.lastTick ? ms : now - S.lastTick
+    S.lastTick = now
+    S.owed = Math.min(S.owed + elapsed, ms * MAX_CATCHUP)
+    const due = Math.floor(S.owed / ms + 0.2)
+    if (due < 1) return
+    S.owed -= due * ms
+    const next = await update($, runAtom, g => {
+      if (!g || g.mode !== 'play') return g
+      let n = g
+      for (let i = 0; i < due && n.mode === 'play'; i++) n = step(n, deskConfig)
+
+      return n
+    })
+    if (next?.mode === 'over') {
       stopGameTimer()
       await saveBest($, next.best)
     }
@@ -291,16 +311,35 @@ async function tickGame($: Dollar) {
 
 // a press starts a run, retries after one, or jumps
 async function pressJump($: Dollar) {
-  const g = await read($, runAtom)
-  if (!g) return
-  const next = act(g, deskConfig)
-  await update($, runAtom, () => next)
-  if (g.mode !== 'play' && next.mode === 'play' && !S.gameTimer) S.gameTimer = $.clock.every(deskConfig.tickMs, () => void tickGame($))
+  let isStart = false
+  const next = await update($, runAtom, g => {
+    isStart = g !== null && g.mode !== 'play'
+
+    return g ? act(g, deskConfig) : g
+  })
+  if (isStart && next?.mode === 'play' && !S.gameTimer) {
+    S.lastTick = 0
+    S.owed = 0
+    S.gameTimer = $.clock.every(deskConfig.tickMs, () => void tickGame($))
+  }
 }
 
 // the keys that play, read at the prompt box: it owns the keyboard, so a key reaches a game that
-// was never clicked only this way
-const isJumpKey = (key: { key: string } | undefined) => key?.key === ' ' || key?.key === 'space' || key?.key === 'up'
+// was never clicked only this way. Space and ↑ always; k only while a run is live, so a draft that
+// starts with k is never in the way while the game waits. Only an empty box is ever touched.
+const SPACE_KEYS = new Set([' ', 'space', 'up'])
+
+async function isGameKey($: Dollar, e: { text: string; inputText: string; key?: { key: string; ctrl?: true; meta?: true } }) {
+  if (e.text !== '' || e.key?.ctrl || e.key?.meta) return false
+  if (!(await read($, gameAtom))) return false
+  const k = e.key?.key
+  // a space with no key named (folded into a burst) is still only blank
+  if (k === undefined) return e.inputText !== '' && e.inputText.trim() === ''
+  if (SPACE_KEYS.has(k)) return e.inputText.trim() === ''
+  if (k === 'k') return S.gameSurface === 'svg' && (await read($, runAtom))?.mode === 'play'
+
+  return false
+}
 
 async function pressKeys($: Dollar) {
   if (S.gameSurface === 'svg') await pressJump($)
@@ -328,6 +367,7 @@ async function toggleGame($: Dollar, isSvg: boolean) {
   }
   const rows = isSvg ? GAME_ROWS.svg : GAME_ROWS.text
   S.gameSurface = isSvg ? 'svg' : 'text'
+  S.logged = 0
   if (S.bandRows < 1 + rows) {
     let isPlaced = false
     try {
@@ -348,33 +388,37 @@ async function toggleGame($: Dollar, isSvg: boolean) {
 
 type VectorEls = Elements['desktop'] | Elements['vscode'] | Elements['mobile']
 
-// the picture of the run, its header above and, where the surface can take keys, a strip below
+// the picture of the run with its one line of guidance above: where the surface can take keys,
+// that line is a `Client` (a click on it jumps and gives it the keyboard); elsewhere it is plain
+// text, with a jump button under the picture
 function sceneView($: Dollar, els: VectorEls, surface: string, run: Game, bodyColumns: number) {
   const { Box, Button, Svg, Text } = els
   // only the desktop takes a Client's keys; the others' tables may hold a stub of one
   const Client = surface === 'desktop' && 'Client' in els ? els.Client : null
   const width = Math.max(150, Math.min(SCENE_MAX_WIDTH, Math.floor(bodyColumns * SCENE_PX_PER_COL)))
   const height = Math.round(width / 5)
+  const line = header(run)
 
   return (
     <Box key="game" flexDirection="column">
-      <Box>
-        <Text color="claude" bold>
-          ✻
-        </Text>
-        <Text dimColor>{header(run)}</Text>
-      </Box>
+      {Client ? (
+        <Client key="strip" module="./strip.tsx" props={{ text: line }} width={Math.min(bodyColumns, 62)} />
+      ) : (
+        <Box>
+          <Text color="claude" bold>
+            ✻
+          </Text>
+          <Text dimColor>{line}</Text>
+        </Box>
+      )}
       <Svg
         key="scene"
         source={sceneSvg(run, deskConfig, { width, height })}
-        alt={`Claude crab game: ${run.mode}, score ${run.score}`}
+        alt={`Claude crab game: ${run.mode}, score ${Math.floor(run.score)}`}
         width={width}
         height={height}
       />
-      <Box columnGap={2}>
-        <Button key="jump" label="jump" hotkey="k" plain onPress={() => pressJump($)} />
-        {Client ? <Client key="strip" module="./strip.tsx" props={{ mode: run.mode }} width={Math.min(bodyColumns, 60)} /> : null}
-      </Box>
+      {Client ? null : <Button key="jump" label="jump" hotkey="k" plain onPress={() => pressJump($)} />}
     </Box>
   )
 }
@@ -424,9 +468,15 @@ export const register: Register = (on, options) => {
 
   // Space and ↑ play while the game is open and the prompt box is empty, without a click on the game
   // first: the box takes them as edits, so they are read here and not typed. Any other text, and the
-  // box behaves as ever.
+  // box behaves as ever. The first few edits while the game is open go to the trace, to show what
+  // the box really hands over.
   on('prompt.edit', async ($, e, next) => {
-    if (e.text === '' && e.inputText.trim() === '' && isJumpKey(e.key) && (await read($, gameAtom))) {
+    const isKey = await isGameKey($, e)
+    if (S.logged < 12 && e.text === '' && (await read($, gameAtom))) {
+      S.logged++
+      void trace($, `edit key=${JSON.stringify(e.key ?? null)} input=${JSON.stringify(e.inputText)} game=${isKey ? 'jump' : 'pass'}`)
+    }
+    if (isKey) {
       await pressKeys($)
 
       return { text: e.text, cursor: e.cursor }
@@ -436,11 +486,17 @@ export const register: Register = (on, options) => {
   }).catch(($, e, next) => next(e))
 
   // the terminal runner posts its high score when a run ends; both games post a close when the
-  // person presses q, and the desktop's key strip posts each jump
+  // person presses q, and the desktop's guidance line posts each jump
   on('ui.message', async ($, e, next) => {
-    const data = e.data as { best?: unknown; close?: unknown; jump?: unknown } | null
+    const data = e.data as { best?: unknown; close?: unknown; jump?: unknown; via?: unknown } | null
     if (data?.close === true) await closeGame($)
-    if (data?.jump === true) await pressJump($)
+    if (data?.jump === true) {
+      if (S.logged < 24) {
+        S.logged++
+        void trace($, `press via=${JSON.stringify(data.via ?? null)}`)
+      }
+      await pressJump($)
+    }
     if (typeof data?.best === 'number' && Number.isFinite(data.best)) await saveBest($, data.best)
 
     return next(e)

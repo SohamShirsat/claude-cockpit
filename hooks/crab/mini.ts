@@ -14,7 +14,7 @@ export const MINI_W = 9
 /** The columns of the crab that can be hit: its body, not its claws. */
 export const HIT = { from: 3, to: 5 } as const
 /** Pixels off the ground per tick of a jump. */
-export const ARC = [1, 2, 3, 3, 3, 3, 3, 2, 1] as const
+export const ARC = [1, 2, 2, 3, 3, 3, 3, 3, 3, 3, 2, 2, 1] as const
 
 const CLAY = '#D97757'
 const INK = '#1F1E1D'

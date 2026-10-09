@@ -1,5 +1,6 @@
 {
   "name": "soham-mods",
+  "description": "Community mods for Claude Code by Soham.",
   "owner": {
     "name": "Soham"
   },
@@ -7,7 +8,7 @@
     {
       "name": "status-band",
       "source": "./",
-      "description": "Compact band above the prompt: context %, cache, limits, handoff, plus a tokenless mascot and mini game while Claude works."
+      "description": "Compact band above the prompt: context %, cache, limits, handoff, plus a tokenless mascot and a grab-the-clouds, dodge-the-bugs game while Claude works."
     }
   ]
 }

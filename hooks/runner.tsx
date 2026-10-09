@@ -14,24 +14,35 @@ type Props = { best?: number; cols?: number; costume?: string; start?: number; s
 type St = { game: Game; cfg: Config; signal: number }
 
 const FIELD_PX = 10 // the tallest crab (7 pixels) plus the top of a jump (3)
-const ROCK = '#C85A54'
-const ROCK_TOP = '#E0736B'
+const BUG = '#C0392B'
+const BUG_TOP = '#E8786B'
+const BIG = '#3B9C5F'
+const BIG_TOP = '#6CC58A'
+const CLOUD = '#9CCBF2'
 const JUMP_KEYS = new Set([' ', 'space', 'up', 'w', 'k', 'return'])
 
-// The field as pixels, top row first: the rocks, then the crab on top of them.
+// The field as pixels, top row first: the clouds, the bugs, then the crab on top of them.
 const field = ({ game: g, cfg }: St): Frame => {
   const px: Frame = Array.from({ length: FIELD_PX }, () => Array<Px>(cfg.width).fill(null))
-  for (const o of g.obs) {
-    for (let c = Math.max(0, o.x); c < Math.min(cfg.width, o.x + o.w); c++) {
-      for (let k = 0; k < o.h; k++) {
+  for (const o of g.clouds) {
+    for (let c = Math.max(0, Math.floor(o.x)); c < Math.min(cfg.width, Math.floor(o.x) + o.w); c++) {
+      for (let k = o.h; k < o.h + cfg.cloud.th; k++) {
         const row = px[FIELD_PX - 1 - k]
-        if (row) row[c] = k === o.h - 1 ? ROCK_TOP : ROCK
+        if (row) row[c] = CLOUD
       }
     }
   }
-  const walk = g.mode === 'play' ? ((Math.floor(g.tick / 3) % 2) as 0 | 1) : 0
+  for (const o of g.obs) {
+    for (let c = Math.max(0, Math.floor(o.x)); c < Math.min(cfg.width, Math.floor(o.x) + o.w); c++) {
+      for (let k = 0; k < o.h; k++) {
+        const row = px[FIELD_PX - 1 - k]
+        if (row) row[c] = k === o.h - 1 ? (o.tall ? BIG_TOP : BUG_TOP) : o.tall ? BIG : BUG
+      }
+    }
+  }
+  const walk = g.mode === 'play' ? ((Math.floor(g.tick / 4) % 2) as 0 | 1) : 0
   const sprite = miniFrame(g.costume, walk, g.mode === 'play' && g.y > 0, g.mode === 'over')
-  const bottom = FIELD_PX - 1 - g.y
+  const bottom = FIELD_PX - 1 - Math.round(g.y)
   sprite.forEach((line, r) => {
     const row = px[bottom - (sprite.length - 1 - r)]
     if (!row) return
@@ -44,7 +55,7 @@ const field = ({ game: g, cfg }: St): Frame => {
 }
 
 const ground = ({ game: g, cfg }: St): string =>
-  Array.from({ length: cfg.width }, (_, c) => ((c + g.off) % 8 === 0 ? '┄' : '─')).join('')
+  Array.from({ length: cfg.width }, (_, c) => ((c + Math.floor(g.off)) % 8 === 0 ? '┄' : '─')).join('')
 
 const pad = (t: string, n: number) => (t.length >= n ? t.slice(0, n) : t + ' '.repeat(n - t.length))
 

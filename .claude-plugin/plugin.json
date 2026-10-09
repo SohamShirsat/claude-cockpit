@@ -1,6 +1,6 @@
 {
   "name": "status-band",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "Compact text band above the prompt: context %, cache countdown, 5h/7d limits, one-click handoff, and a tokenless mascot and a Claude-crab runner game while Claude works.",
   "types": "./types/index.d.ts",
   "userConfig": {

@@ -25,8 +25,14 @@ export type CostumeId = 'plain' | 'astronaut' | 'detective' | 'engineer' | 'chef
 
 export type GameMode = 'ready' | 'play' | 'over'
 
-/** A rock or a cactus coming at the crab: `x` its left edge, `w` and `h` its size, in game units. */
+/** A bug coming at the crab (`tall` for the big one): `x` its left edge, `w` and `h` its size, in game units. */
 export type Obstacle = { x: number; w: number; h: number; tall: boolean }
+
+/** A cloud in the air to grab: `x` its left edge, `h` how far its underside is above the ground. */
+export type Cloud = { x: number; w: number; h: number }
+
+/** The sparkle where a cloud was grabbed: `age` in ticks since. */
+export type Pop = { x: number; h: number; age: number }
 
 /** One run of the crab game. Plain data: the same rules drive the terminal and the desktop. */
 export type Game = {
@@ -37,13 +43,23 @@ export type Game = {
   y: number
   /** index into the jump arc, -1 on the ground */
   jump: number
+  /** a press just before landing: the next jump starts the moment the crab lands */
+  queued: boolean
   obs: Obstacle[]
+  clouds: Cloud[]
+  pops: Pop[]
+  /** clouds grabbed this run */
+  grabbed: number
+  /** the score runs on fractions of a point per tick; show it rounded down */
   score: number
   best: number
   seed: number
   /** ticks since the last obstacle came in, and how many until the next one */
   since: number
   gap: number
+  /** the same for the next cloud */
+  sinceCloud: number
+  cloudGap: number
   /** ground scroll */
   off: number
   costume: CostumeId

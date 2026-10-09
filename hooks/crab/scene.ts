@@ -1,8 +1,9 @@
-// The crab game as a vector scene: the crab, its stone and cactus, the ground. Used where the
+// The crab game as a vector scene: the crab, its bugs and clouds, the ground. Used where the
 // surface draws SVG (the desktop), since a proportional font cannot lay block characters out as
 // pixels. One unit is one art pixel of the full-size crab. Pure: a Game in, markup out.
 
 import type { CostumeId, Game } from '../../types'
+import { POP_TICKS } from './game'
 import type { Config } from './game'
 import { GRID, layers, paintOrder } from './master'
 import type { Layers, Rect } from './master'
@@ -10,6 +11,9 @@ import type { Layers, Rect } from './master'
 export const SCENE = { w: 340, h: 68, ground: 60, feet: 26 } as const
 
 type Tf = { t?: string; o?: number }
+
+/** A position to a tenth of a unit: moves smoothly, and the markup stays short. */
+const r1 = (n: number) => Math.round(n * 10) / 10
 
 // Each costume's prop moves on a few frames of the run's tick, as the full-size animation does
 // in CSS (which an image redrawn every frame would restart, so the motion is spelled out here).
@@ -59,18 +63,42 @@ export const crabGroup = (id: CostumeId, tick: number, air: boolean, running: bo
   return `<g transform="translate(0 ${fy})"><g transform="translate(0 ${bob})">${body}</g><g transform="translate(0 ${legA})">${(l.la ?? []).map(rect).join('')}</g><g transform="translate(0 ${legB})">${(l.lb ?? []).map(rect).join('')}</g></g>`
 }
 
-const stamp = (x: number, y: number, rows: string[], map: Record<string, string>): string =>
-  rows
-    .flatMap((row, dy) => [...row].map((ch, dx) => (map[ch] ? `<rect x="${x + dx}" y="${y + dy}" width="1" height="1" fill="${map[ch]}"/>` : '')))
-    .join('')
+// Pixel art, one letter a color. One path per color (a run of pixels is one stroke) keeps a
+// frame small: the desktop redraws it 25 times a second.
+const stamp = (x: number, y: number, rows: string[], map: Record<string, string>): string => {
+  const paths: Record<string, string> = {}
+  rows.forEach((row, dy) => {
+    for (let dx = 0; dx < row.length; ) {
+      const ch = row[dx] ?? '.'
+      let len = 1
+      while (row[dx + len] === ch) len++
+      if (map[ch]) paths[ch] = `${paths[ch] ?? ''}M${x + dx} ${y + dy}h${len}v1h-${len}z`
+      dx += len
+    }
+  })
 
-const STONE = ['....gggg....', '..gggghggg..', '.ggghhgggggg', '.gghgggggggg', 'gggggggggggg', 'gggggggggggd', 'gggggggggddd', 'ggggggddddd.', '.dddddddddd.']
-const STONE_COLORS = { g: '#8E929A', h: '#B6BAC1', d: '#686C74' }
-const CACTUS = [
-  '...gg...', '...gg...', '.g.gg...', '.g.gg.g.', '.g.gg.g.', '.gggg.g.', '..ggg.g.', '...gggg.', '...ggg..',
-  '...gg...', '...gg...', '...gg...', '...gg...', '...gg...', '...gg...', '...gg...', '..gggg..', '..gggg..',
+  return Object.entries(paths)
+    .map(([ch, d]) => `<path d="${d}" fill="${map[ch]}"/>`)
+    .join('')
+}
+
+// a ladybug, and a big green beetle: the bugs to dodge
+const BUG = [
+  '.k........k.', '..k......k..', '...bbbbbb...', '..bhhbbbbb..', '.bbhbbkbbbb.',
+  '.bbbbbkbbbb.', '.bbbbbkbbbb.', 'k.bbbbkbbb.k', '.k.k....k.k.',
 ]
-const CACTUS_COLORS = { g: '#3B9C5F', h: '#6CC58A' }
+const BUG_COLORS = { b: '#C0392B', h: '#E8786B', k: '#1F1E1D' }
+const BIG = [
+  '..k......k..', '...k....k...', '....gggg....', '...geggeg...', '..gggggggg..', '.gghhgggggg.', '.ggghgkgggg.',
+  '.gggggkgggg.', '.gggggkgggg.', '.gggggkgggg.', 'k.ggggkggg.k', '.gggggkgggg.', '.k.k....k.k.',
+]
+const BIG_COLORS = { g: '#3B9C5F', h: '#6CC58A', e: '#F8F6F1', k: '#1F1E1D' }
+// the cloud to grab
+const CLOUD = [
+  '.....wwww.......', '...wwwwwwww.....', '..wwwhhwwwwwww..', '.wwwwhwwwwwwwww.',
+  'wwwwwwwwwwwwwwww', 'wwwwwwwwwwwwwwww', '.wwwwwwwwwwwwww.', '..dddddddddddd..',
+]
+const CLOUD_COLORS = { w: '#9CCBF2', h: '#D6EBFC', d: '#6BA8DD' }
 
 const CSS = `.gl{fill:#d4d3cf}.dash{fill:#c2c1bc}.cl{fill:#e6e5e1}
 @media (prefers-color-scheme: dark){.gl{fill:#3a3a38}.dash{fill:#4a4a47}.cl{fill:#2c2c2b}}`
@@ -94,13 +122,24 @@ export const sceneSvg = (g: Game, cfg: Config, size: { width: number; height: nu
     const x = Math.round(i * 28 - (g.off % 28)) + 6
     parts.push(`<rect class="dash" x="${x}" y="${ground + 3 + (i % 2) * 2}" width="${6 - (i % 3)}" height="1"/>`)
   }
-  // rocks and cacti: the stone sits on the ground, the cactus likewise
+  // clouds to grab, up in the air; a sparkle where one was just grabbed
+  for (const c of g.clouds) {
+    parts.push(`<g transform="translate(${r1(c.x)} ${r1(ground - c.h - CLOUD.length)})">${stamp(0, 0, CLOUD, CLOUD_COLORS)}</g>`)
+  }
+  for (const p of g.pops) {
+    const d = 2 + p.age * 1.6
+    const cy = ground - p.h - CLOUD.length / 2
+    const fill = p.age < POP_TICKS / 2 ? '#F5C542' : '#F9DE8B'
+    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [-0.7, -0.7], [0.7, -0.7], [-0.7, 0.7], [0.7, 0.7]] as const) {
+      parts.push(`<rect x="${r1(p.x + dx * d)}" y="${r1(cy + dy * d)}" width="2" height="2" fill="${fill}"/>`)
+    }
+  }
+  // bugs: each sits on the ground
   for (const o of g.obs) {
-    const x = Math.round(o.x)
     parts.push(
       o.tall
-        ? `<g transform="translate(${x} ${ground - CACTUS.length})">${stamp(0, 0, CACTUS, CACTUS_COLORS)}</g>`
-        : `<g transform="translate(${x} ${ground - STONE.length})">${stamp(0, 0, STONE, STONE_COLORS)}</g>`,
+        ? `<g transform="translate(${r1(o.x)} ${ground - BIG.length})">${stamp(0, 0, BIG, BIG_COLORS)}</g>`
+        : `<g transform="translate(${r1(o.x)} ${ground - BUG.length})">${stamp(0, 0, BUG, BUG_COLORS)}</g>`,
     )
   }
   // the crab: feet on the ground; belly up and grey once the run is lost

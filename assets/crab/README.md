@@ -30,7 +30,7 @@ see `LICENSE-upstream`), which traces DockCrab's Clawdy. Open `sheet.html` to se
 - **In this mod:** `hooks/crab/master.ts` is the source of truth (`layers(id)`, `toSvg(id)`);
   `hooks/crab/mini.ts` holds the game-size sprites (`miniFrame(id, step, air, dead)`) and the
   half-block drawing (`toCells`, `toRuns`). The runner in `hooks/runner.tsx` is built on them.
-- **The game scene:** `hooks/crab/scene.ts` (`sceneSvg(game, config, size)`, `crabGroup(id, tick, air, running)`) draws a posed, animated crab on the ground with stones and cacti; `hooks/crab/game.ts` has the rules.
+- **The game scene:** `hooks/crab/scene.ts` (`sceneSvg(game, config, size)`, `crabGroup(id, tick, air, running)`) draws a posed, animated crab on the ground with bugs and clouds; `hooks/crab/game.ts` has the rules.
 - **A new animation or game:** import `miniFrame` and draw its pixels two to a cell, or take
   `sprites.json` into anything that draws rectangles.
 - **Regenerate** after editing a sprite: `node --import ./scripts/ts-loader.mjs scripts/build-assets.ts`
