@@ -150,8 +150,8 @@ const num = (n: number) => String(n).padStart(4, '0')
 
 /** The line above the field. */
 export const header = (g: Game): string => {
-  if (g.mode === 'play') return ` score ${num(g.score)} · best ${num(g.best)} · space / ↑ / click to jump`
-  if (g.mode === 'over') return ` game over ${num(g.score)} · best ${num(g.best)} · space retry · q close`
+  if (g.mode === 'play') return ` score ${num(g.score)} · best ${num(g.best)} · space / ↑ / k to jump`
+  if (g.mode === 'over') return ` game over ${num(g.score)} · best ${num(g.best)} · space to retry`
 
-  return ` ${g.costume} · best ${num(g.best)} · space / ↑ / click to start · q close`
+  return ` ${g.costume} · best ${num(g.best)} · space / ↑ / k to start`
 }

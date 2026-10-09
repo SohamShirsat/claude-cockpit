@@ -9,9 +9,9 @@ type Props = { mode?: string } | null
 const JUMP_KEYS = new Set([' ', 'space', 'up', 'w', 'k', 'return'])
 
 const LABEL: Record<string, string> = {
-  ready: 'click here or press space to start · q close',
-  play: 'click here or press space / ↑ to jump',
-  over: 'game over · click here or press space to retry · q close',
+  ready: 'space / ↑ with an empty prompt box, k, or click here · q close',
+  play: 'space / ↑ with an empty prompt box, k, or click here',
+  over: 'game over · space to retry, or click here · q close',
 }
 
 const Strip: ClientModule<Props, boolean> = (props, surface) => {

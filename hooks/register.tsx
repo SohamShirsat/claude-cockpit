@@ -13,8 +13,10 @@ const handoffAtom = atom({ plugin: 'status-band', key: 'handoff' } as const, 'id
 const bestAtom = atom({ plugin: 'status-band', key: 'best' } as const, 0)
 const gameAtom = atom({ plugin: 'status-band', key: 'gameOpen' } as const, false)
 const runAtom = atom({ plugin: 'status-band', key: 'game' } as const, null)
+// the terminal's game lives in its Client: each press of the prompt's keys bumps this, and the Client acts on a change
+const signalAtom = atom({ plugin: 'status-band', key: 'jumpSignal' } as const, 0)
 
-const VERSION = '0.7.0'
+const VERSION = '0.7.1'
 // rows the game takes: the terminal's is a header, the five rows of the field and the ground;
 // the desktop's a header, the picture (108 px) and the key strip
 const GAME_ROWS = { text: 7, svg: 8 } as const
@@ -93,6 +95,7 @@ const S = {
   gameTimer: null as { cancel: () => void } | null,
   isGameBusy: false,
   costume: 'auto',
+  gameSurface: 'text' as 'text' | 'svg',
   dims: new Set<string>(),
 }
 
@@ -295,6 +298,15 @@ async function pressJump($: Dollar) {
   if (g.mode !== 'play' && next.mode === 'play' && !S.gameTimer) S.gameTimer = $.clock.every(deskConfig.tickMs, () => void tickGame($))
 }
 
+// the keys that play, read at the prompt box: it owns the keyboard, so a key reaches a game that
+// was never clicked only this way
+const isJumpKey = (key: { key: string } | undefined) => key?.key === ' ' || key?.key === 'space' || key?.key === 'up'
+
+async function pressKeys($: Dollar) {
+  if (S.gameSurface === 'svg') await pressJump($)
+  else await update($, signalAtom, n => (n ?? 0) + 1)
+}
+
 async function closeGame($: Dollar) {
   stopGameTimer()
   await update($, gameAtom, () => false)
@@ -315,6 +327,7 @@ async function toggleGame($: Dollar, isSvg: boolean) {
     return
   }
   const rows = isSvg ? GAME_ROWS.svg : GAME_ROWS.text
+  S.gameSurface = isSvg ? 'svg' : 'text'
   if (S.bandRows < 1 + rows) {
     let isPlaced = false
     try {
@@ -358,11 +371,10 @@ function sceneView($: Dollar, els: VectorEls, surface: string, run: Game, bodyCo
         width={width}
         height={height}
       />
-      {Client ? (
-        <Client key="strip" module="./strip.tsx" props={{ mode: run.mode }} width={Math.min(bodyColumns, 60)} />
-      ) : (
-        <Button key="jump" label="↑ jump" plain onPress={() => pressJump($)} />
-      )}
+      <Box columnGap={2}>
+        <Button key="jump" label="jump" hotkey="k" plain onPress={() => pressJump($)} />
+        {Client ? <Client key="strip" module="./strip.tsx" props={{ mode: run.mode }} width={Math.min(bodyColumns, 60)} /> : null}
+      </Box>
     </Box>
   )
 }
@@ -409,6 +421,19 @@ export const register: Register = (on, options) => {
 
     return next(e)
   })
+
+  // Space and ↑ play while the game is open and the prompt box is empty, without a click on the game
+  // first: the box takes them as edits, so they are read here and not typed. Any other text, and the
+  // box behaves as ever.
+  on('prompt.edit', async ($, e, next) => {
+    if (e.text === '' && e.inputText.trim() === '' && isJumpKey(e.key) && (await read($, gameAtom))) {
+      await pressKeys($)
+
+      return { text: e.text, cursor: e.cursor }
+    }
+
+    return next(e)
+  }).catch(($, e, next) => next(e))
 
   // the terminal runner posts its high score when a run ends; both games post a close when the
   // person presses q, and the desktop's key strip posts each jump
@@ -485,12 +510,12 @@ export const register: Register = (on, options) => {
         </Box>
       )
     }
-    const [best, now] = await Promise.all([read($, bestAtom), $.clock.now()])
+    const [best, now, signal] = await Promise.all([read($, bestAtom), $.clock.now(), read($, signalAtom)])
     const cols = Math.max(30, Math.min(e.props.bodyColumns, 56))
 
     return (
       <Box>
-        <Client key={`runner-${cols}`} module="./runner.tsx" props={{ best, cols, costume: S.costume, start: Math.floor(now / 60000) }} width={cols} />
+        <Client key={`runner-${cols}`} module="./runner.tsx" props={{ best, cols, costume: S.costume, start: Math.floor(now / 60000), signal }} width={cols} />
       </Box>
     )
   })
@@ -503,7 +528,7 @@ export const register: Register = (on, options) => {
     const Client = 'Client' in els ? els.Client : null
     // the terminal's element table holds an empty Svg: only the other surfaces draw one
     const isSvg = e.surface !== 'terminal' && 'Svg' in els
-    const [usage, cacheRaw, now, phase, best, gameOpen, run] = await Promise.all([
+    const [usage, cacheRaw, now, phase, best, gameOpen, run, signal] = await Promise.all([
       read($, usageAtom),
       read($, cacheAtom),
       $.clock.now(),
@@ -511,6 +536,7 @@ export const register: Register = (on, options) => {
       read($, bestAtom),
       read($, gameAtom),
       read($, runAtom),
+      read($, signalAtom),
     ])
     const cache = cacheRaw && typeof cacheRaw.at === 'number' ? cacheRaw : null
     const wide = e.props.bodyColumns >= 100
@@ -654,7 +680,7 @@ export const register: Register = (on, options) => {
     } else if (isGameHere && Client) {
       game = (
         <Box key="game" marginTop={e.props.maxRows >= 2 + gameRows ? 1 : 0}>
-          <Client key={`runner-${gameCols}`} module="./runner.tsx" props={{ best, cols: gameCols, costume: S.costume, start: Math.floor(now / 60000) }} width={gameCols} />
+          <Client key={`runner-${gameCols}`} module="./runner.tsx" props={{ best, cols: gameCols, costume: S.costume, start: Math.floor(now / 60000), signal }} width={gameCols} />
         </Box>
       )
     }

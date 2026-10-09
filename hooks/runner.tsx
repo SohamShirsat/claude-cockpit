@@ -10,8 +10,8 @@ import type { Frame, Px } from './crab/mini'
 // frame timer only redraws while a run is live. (The desktop draws a vector scene instead: its
 // proportional font cannot lay block characters out as pixels. See hooks/crab/scene.ts.)
 
-type Props = { best?: number; cols?: number; costume?: string; start?: number } | null
-type St = { game: Game; cfg: Config }
+type Props = { best?: number; cols?: number; costume?: string; start?: number; signal?: number } | null
+type St = { game: Game; cfg: Config; signal: number }
 
 const FIELD_PX = 10 // the tallest crab (7 pixels) plus the top of a jump (3)
 const ROCK = '#C85A54'
@@ -74,11 +74,18 @@ const Runner: ClientModule<Props, St> = (props, surface) => {
       if (ev.type === 'down') press()
     })
     const best = Math.max(0, Math.floor(props?.best ?? 0))
-    surface.setState({ cfg, game: fresh(best, 7, 'ready', lookFor(props?.costume, props?.start ?? 0), cfg) })
+    surface.setState({ cfg, signal: props?.signal ?? 0, game: fresh(best, 7, 'ready', lookFor(props?.costume, props?.start ?? 0), cfg) })
   }
 
   const s = surface.state
   if (!s) return <Box height={0} />
+
+  // the hooks module reads Space / ↑ at the prompt box and says so by changing `signal`
+  const signal = props?.signal ?? 0
+  if (signal !== s.signal) {
+    surface.setState({ ...s, signal, game: act(s.game, s.cfg) })
+    return <Box height={0} />
+  }
 
   const rows = toCells(field(s))
   return (

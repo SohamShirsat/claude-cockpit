@@ -61,6 +61,7 @@ declare module 'claude-code' {
       best: number
       gameOpen: boolean
       game: Game | null
+      jumpSignal: number
     }
   }
 }

@@ -191,6 +191,7 @@ const world = (on: (event: string, hook: (...args: never[]) => unknown) => unkno
     seen.closed.push(e.id)
     return { value: undefined }
   })
+  hook('prompt.edit', editor)
   hook('tool.call', () => ({ result: {}, text: '' }))
   hook('turn.complete', (_$: unknown, e: { answer: string; usage: unknown }) => ({ text: e.answer, usage: e.usage }))
   return seen
@@ -226,6 +227,27 @@ describe('while working', () => {
     expect(await ui.find({ type: 'Text', text: /0:0\d/ })).toBeDefined()
     await ui.unmount()
   })
+})
+
+
+
+// the engine's own editor, beneath the plugins: the splice applied as the box would show it
+const editor = (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({
+  text: e.text.slice(0, e.start) + e.inputText + e.text.slice(e.end),
+  cursor: e.start + e.inputText.length,
+})
+const edit = ($: Engine, e: unknown) =>
+  ($ as unknown as { prompt: { edit: (e: unknown) => Promise<{ text: string; cursor: number }> } }).prompt.edit(e)
+
+// what the editor hands `prompt.edit` for one key at the prompt box
+const typed = (key: string, text = '') => ({
+  origin: { kind: 'composer' as const },
+  key: { key },
+  text,
+  cursor: text.length,
+  start: text.length,
+  end: text.length,
+  inputText: key === 'up' ? '' : key,
 })
 
 describe('game (terminal: half-block pixels in a Client)', () => {
@@ -308,6 +330,21 @@ describe('game (terminal: half-block pixels in a Client)', () => {
       await ui.unmount()
     })
   }
+
+  test('space at the prompt box starts and jumps the terminal game as well', async ($, on) => {
+    world(on as never, '/work/none', [])
+    const ui = await band($, 'terminal', { isWorking: true, bodyColumns: 100 })
+    await ui.press({ key: 'play' })
+    const inRunner = (text: RegExp) => ui.find({ type: 'Text', text, in: 'runner-56' } as never)
+    expect(await inRunner(/to start/)).toBeDefined()
+
+    const kept = await edit($, typed(' ') as never)
+    expect(kept.text).toBe('')
+    await ui.advance(300)
+    expect(await inRunner(/score 00/)).toBeDefined()
+    await ui.press({ key: 'play' })
+    await ui.unmount()
+  })
 
   test('a costume picked in the settings is the one that runs, and it stays through retries', { options: { costume: 'chef' } }, async ($, on) => {
     world(on as never, '/work/none', [])
@@ -400,6 +437,58 @@ describe('game (desktop: a vector scene, a key strip, and a run the hooks module
     await ui.post({ jump: true }, { in: 'strip' } as never)
     await clock.advance(70 * 200)
     expect(await ui.find({ type: 'Text', text: /best 00[1-9]\d/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('space and the up arrow play from the prompt box, with no click on the game first', async ($, on) => {
+    const { clock, ui } = await open($, on)
+    expect(await ui.find({ type: 'Text', text: /to start/ })).toBeDefined()
+
+    // space starts the run, and the box stays empty: the key is read, not typed
+    const kept = await edit($, typed(' ') as never)
+    expect(kept.text).toBe('')
+    await clock.advance(70 * 5)
+    expect(await ui.find({ type: 'Text', text: /score 00/ })).toBeDefined()
+
+    // the up arrow is a jump now
+    await edit($, typed('up') as never)
+    await clock.advance(70)
+    const during = await svg(ui)
+    expect(during).toContain('<svg')
+
+    // never jumping again: the run ends, and space retries it
+    await clock.advance(70 * 300)
+    expect(await ui.find({ type: 'Text', text: /game over/ })).toBeDefined()
+    await edit($, typed(' ') as never)
+    await clock.advance(70 * 3)
+    expect(await ui.find({ type: 'Text', text: /score 00/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('typing is untouched: a space in a draft, any other key, or a closed game', async ($, on) => {
+    const { clock, ui } = await open($, on)
+    // a draft already in the box: the space is the person's
+    const draft = await edit($, typed(' ', 'fix the') as never)
+    expect(draft.text).toBe('fix the ')
+    // a letter is typed as ever
+    const letter = await edit($, typed('a') as never)
+    expect(letter.text).toBe('a')
+    await clock.advance(70 * 10)
+    expect(await ui.find({ type: 'Text', text: /to start/ })).toBeDefined()
+
+    // game closed: space is a space again
+    await ui.press({ key: 'play' })
+    const after = await edit($, typed(' ') as never)
+    expect(after.text).toBe(' ')
+    await ui.unmount()
+  })
+
+  test('the k key is a jump button too, for when the band holds the focus', async ($, on) => {
+    const { clock, ui } = await open($, on)
+    expect(await ui.find({ type: 'Button', key: 'jump' })).toBeDefined()
+    await ui.press({ key: 'jump' })
+    await clock.advance(70 * 4)
+    expect(await ui.find({ type: 'Text', text: /score 00/ })).toBeDefined()
     await ui.unmount()
   })
 
