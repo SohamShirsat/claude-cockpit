@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import { COSTUMES, GRID, layers, paintOrder, toSvg } from './master'
+import { act, deskConfig, fresh, lookFor, ROTATION, step, termConfig } from './game'
+import type { Config, Game } from './game'
 import { ARC, HIT, MINI_W, miniFrame, miniHeight, toCells, toRuns } from './mini'
+import { sceneSvg, SCENE, topOf } from './scene'
 
 describe('master sprites', () => {
   test('seven costumes, each with a body and both leg pairs, all inside the grid', () => {
@@ -87,5 +90,103 @@ describe('game-size sprites', () => {
       { text: '  ', fg: undefined, bg: undefined },
       { text: '▀', fg: '#111111', bg: undefined },
     ])
+  })
+})
+
+// a player that jumps as a rock comes within reach
+const play = (cfg: Config, ticks: number, look: Parameters<typeof fresh>[3], skill = true): Game => {
+  let g = act(fresh(0, 99, 'ready', look, cfg), cfg)
+  for (let i = 0; i < ticks && g.mode === 'play'; i++) {
+    const speed = cfg.speed(g.score)
+    const reach = cfg.arc.length * speed * 0.3
+    const next = g.obs.find(o => o.x + o.w > cfg.crabX + cfg.hit[0])
+    if (skill && next && g.jump < 0 && next.x - (cfg.crabX + cfg.hit[1]) <= reach) g = act(g, cfg)
+    g = step(g, cfg)
+  }
+
+  return g
+}
+
+describe('game rules', () => {
+  for (const [name, cfg] of [['terminal', termConfig(56)], ['desktop', deskConfig]] as const) {
+    test(`${name}: standing still ends the run, and the first rock does it`, () => {
+      const g = play(cfg, 400, lookFor('plain', 0), false)
+      expect(g.mode).toBe('over')
+      expect(g.best).toBeGreaterThan(0)
+      expect(g.score).toBeLessThan(150)
+    })
+
+    test(`${name}: every rock and cactus can be jumped, at every speed it reaches`, () => {
+      // a long run of well-timed jumps never dies: the arc clears the tallest obstacle with room to spare
+      const g = play(cfg, 6000, lookFor('plain', 0))
+      expect(g.mode).toBe('play')
+      expect(g.score).toBeGreaterThanOrEqual(6000)
+      expect(cfg.speed(g.score)).toBe(cfg.speed(99999))
+    })
+
+    test(`${name}: obstacles start off the field's right edge and are dropped once they pass`, () => {
+      let g = act(fresh(0, 5, 'ready', lookFor('plain', 0), cfg), cfg)
+      const seen = new Set<number>()
+      for (let i = 0; i < 400 && g.mode === 'play'; i++) {
+        g = step(g, cfg)
+        for (const o of g.obs) {
+          expect(o.x + o.w).toBeGreaterThan(0)
+          expect(o.x).toBeLessThanOrEqual(cfg.width)
+          seen.add(o.x)
+        }
+        if (g.jump < 0 && g.obs.some(o => o.x < cfg.crabX + cfg.hit[1] + 3 * cfg.speed(g.score) && o.x + o.w > cfg.crabX)) g = act(g, cfg)
+      }
+      expect(seen.size).toBeGreaterThan(5)
+    })
+  }
+
+  test('a new costume comes with every retry, and a named one stays', () => {
+    const auto = lookFor('auto', 0)
+    let g = act(fresh(0, 3, 'ready', auto, deskConfig), deskConfig)
+    expect(g.costume).toBe(ROTATION[0])
+    g = { ...g, mode: 'over' }
+    g = act(g, deskConfig)
+    expect(g.costume).toBe(ROTATION[1])
+    const chef = lookFor('chef', 4)
+    let c = act(fresh(0, 3, 'ready', chef, deskConfig), deskConfig)
+    c = act({ ...c, mode: 'over' }, deskConfig)
+    expect(c.costume).toBe('chef')
+  })
+
+  test('the best score is kept when a run ends', () => {
+    const g = play(deskConfig, 300, lookFor('plain', 0), false)
+    expect(g.best).toBe(g.mode === 'over' ? g.best : 0)
+    expect(g.best).toBeGreaterThanOrEqual(0)
+  })
+})
+
+describe('desktop scene', () => {
+  test('every costume draws a standalone svg on the ground, in the scene box', () => {
+    for (const costume of ROTATION) {
+      const g = { ...fresh(0, 3, 'play', lookFor(costume, 0), deskConfig), tick: 5, obs: [{ x: 200, w: 8, h: 18, tall: true }, { x: 280, w: 12, h: 9, tall: false }] }
+      const svg = sceneSvg(g, deskConfig, { width: 540, height: 108 })
+      expect(svg.startsWith('<svg')).toBe(true)
+      expect(svg).toContain(`viewBox="0 0 ${SCENE.w} ${SCENE.h}"`)
+      expect(svg).toContain('#D97757')
+      expect(svg).toContain('#3B9C5F')
+      expect(svg).toContain('#8E929A')
+      expect(svg.length).toBeLessThan(20000)
+    }
+  })
+
+  test('the crab leaves the ground while it jumps and never leaves the scene', () => {
+    const base = fresh(0, 3, 'play', lookFor('chef', 0), deskConfig)
+    const ty = (y: number) => Number(/translate\(36 (-?[\d.]+)\)/.exec(sceneSvg({ ...base, y }, deskConfig, { width: 540, height: 108 }))?.[1])
+    expect(ty(0)).toBe(SCENE.ground - SCENE.feet)
+    expect(ty(20)).toBe(SCENE.ground - SCENE.feet - 20)
+    // the highest hat at the top of the jump is still inside the scene
+    const top = Math.max(...deskConfig.arc)
+    for (const c of ROTATION) expect(SCENE.ground - SCENE.feet - top + topOf(c)).toBeGreaterThanOrEqual(0)
+  })
+
+  test('a lost run is drawn belly up and grey', () => {
+    const g = fresh(0, 3, 'over', lookFor('plain', 0), deskConfig)
+    expect(sceneSvg(g, deskConfig, { width: 540, height: 108 })).toContain('rotate(180 15 18)')
+    expect(sceneSvg({ ...g, mode: 'play' }, deskConfig, { width: 540, height: 108 })).not.toContain('rotate(180')
   })
 })

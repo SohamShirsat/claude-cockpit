@@ -1,7 +1,9 @@
 import { atom, read, update } from 'claude-code'
-import type { Hook, Register, RenderSurface } from 'claude-code'
+import type { Elements, Hook, Register } from 'claude-code'
 
-import type { Cache, HandoffPhase, Repo, Usage } from '../types'
+import type { Cache, Game, HandoffPhase, Repo, Usage } from '../types'
+import { act, deskConfig, fresh, header, lookFor, step } from './crab/game'
+import { sceneSvg } from './crab/scene'
 
 type Dollar = Parameters<Hook<'session.start'>>[0]
 
@@ -10,10 +12,14 @@ const cacheAtom = atom({ plugin: 'status-band', key: 'cache' } as const, null)
 const handoffAtom = atom({ plugin: 'status-band', key: 'handoff' } as const, 'idle')
 const bestAtom = atom({ plugin: 'status-band', key: 'best' } as const, 0)
 const gameAtom = atom({ plugin: 'status-band', key: 'gameOpen' } as const, false)
+const runAtom = atom({ plugin: 'status-band', key: 'game' } as const, null)
 
-const VERSION = '0.6.0'
-// header, the five rows of the field, the ground
-const GAME_ROWS = 7
+const VERSION = '0.7.0'
+// rows the game takes: the terminal's is a header, the five rows of the field and the ground;
+// the desktop's a header, the picture (108 px) and the key strip
+const GAME_ROWS = { text: 7, svg: 8 } as const
+const SCENE_PX_PER_COL = 7.6
+const SCENE_MAX_WIDTH = 540
 const GAME_PANE = 'status-band-runner'
 
 const baseName = (p: string) => p.slice(p.lastIndexOf('/') + 1)
@@ -84,6 +90,9 @@ const S = {
   workStart: 0,
   bandRows: 99,
   isPaneOpen: false,
+  gameTimer: null as { cancel: () => void } | null,
+  isGameBusy: false,
+  costume: 'auto',
   dims: new Set<string>(),
 }
 
@@ -239,8 +248,57 @@ async function runHandoff($: Dollar) {
   }
 }
 
+function stopGameTimer() {
+  if (S.gameTimer) S.gameTimer.cancel()
+  S.gameTimer = null
+}
+
+async function saveBest($: Dollar, score: number) {
+  const best = Math.min(Math.floor(score), 99999)
+  if (!(best > (await read($, bestAtom)))) return
+  await update($, bestAtom, () => best)
+  try {
+    await $.store.set('best', best)
+  } catch {
+    // the score still shows this session
+  }
+}
+
+// the desktop's game: the hooks module owns the run and steps it on a timer while it is live;
+// the picture is drawn from it (hooks/crab/scene.ts) and the key strip only reports presses
+async function tickGame($: Dollar) {
+  if (S.isGameBusy) return
+  S.isGameBusy = true
+  try {
+    const g = await read($, runAtom)
+    if (!g || g.mode !== 'play') {
+      stopGameTimer()
+      return
+    }
+    const next = step(g, deskConfig)
+    await update($, runAtom, () => next)
+    if (next.mode === 'over') {
+      stopGameTimer()
+      await saveBest($, next.best)
+    }
+  } finally {
+    S.isGameBusy = false
+  }
+}
+
+// a press starts a run, retries after one, or jumps
+async function pressJump($: Dollar) {
+  const g = await read($, runAtom)
+  if (!g) return
+  const next = act(g, deskConfig)
+  await update($, runAtom, () => next)
+  if (g.mode !== 'play' && next.mode === 'play' && !S.gameTimer) S.gameTimer = $.clock.every(deskConfig.tickMs, () => void tickGame($))
+}
+
 async function closeGame($: Dollar) {
+  stopGameTimer()
   await update($, gameAtom, () => false)
+  await update($, runAtom, () => null)
   if (!S.isPaneOpen) return
   S.isPaneOpen = false
   try {
@@ -251,15 +309,16 @@ async function closeGame($: Dollar) {
 }
 
 // the game sits in the band when the band has the rows for it, else in a pane of its own
-async function toggleGame($: Dollar) {
+async function toggleGame($: Dollar, isSvg: boolean) {
   if (await read($, gameAtom)) {
     await closeGame($)
     return
   }
-  if (S.bandRows < 1 + GAME_ROWS) {
+  const rows = isSvg ? GAME_ROWS.svg : GAME_ROWS.text
+  if (S.bandRows < 1 + rows) {
     let isPlaced = false
     try {
-      isPlaced = (await $.ui.open({ id: GAME_PANE, title: 'Claude runner', rows: GAME_ROWS + 1 })).isPlaced
+      isPlaced = (await $.ui.open({ id: GAME_PANE, title: 'Claude runner', rows: rows + 1 })).isPlaced
     } catch {
       isPlaced = false
     }
@@ -269,16 +328,54 @@ async function toggleGame($: Dollar) {
     }
     S.isPaneOpen = true
   }
+  const [best, now] = await Promise.all([read($, bestAtom), $.clock.now()])
+  await update($, runAtom, () => fresh(best, 1 + (now % 99991), 'ready', lookFor(S.costume, Math.floor(now / 60000)), deskConfig))
   await update($, gameAtom, () => true)
+}
+
+type VectorEls = Elements['desktop'] | Elements['vscode'] | Elements['mobile']
+
+// the picture of the run, its header above and, where the surface can take keys, a strip below
+function sceneView($: Dollar, els: VectorEls, surface: string, run: Game, bodyColumns: number) {
+  const { Box, Button, Svg, Text } = els
+  // only the desktop takes a Client's keys; the others' tables may hold a stub of one
+  const Client = surface === 'desktop' && 'Client' in els ? els.Client : null
+  const width = Math.max(150, Math.min(SCENE_MAX_WIDTH, Math.floor(bodyColumns * SCENE_PX_PER_COL)))
+  const height = Math.round(width / 5)
+
+  return (
+    <Box key="game" flexDirection="column">
+      <Box>
+        <Text color="claude" bold>
+          ✻
+        </Text>
+        <Text dimColor>{header(run)}</Text>
+      </Box>
+      <Svg
+        key="scene"
+        source={sceneSvg(run, deskConfig, { width, height })}
+        alt={`Claude crab game: ${run.mode}, score ${run.score}`}
+        width={width}
+        height={height}
+      />
+      {Client ? (
+        <Client key="strip" module="./strip.tsx" props={{ mode: run.mode }} width={Math.min(bodyColumns, 60)} />
+      ) : (
+        <Button key="jump" label="↑ jump" plain onPress={() => pressJump($)} />
+      )}
+    </Box>
+  )
 }
 
 export const register: Register = (on, options) => {
   const ttlMs = (Number(options.cacheTtlMinutes) || 60) * 60000
   const buddy = String(options.buddy ?? 'game')
-  const costume = String(options.costume ?? 'auto')
+  S.costume = String(options.costume ?? 'auto')
   on('session.start', async ($, e, next) => {
     await setHandoff($, 'idle')
+    stopGameTimer()
     await update($, gameAtom, () => false)
+    await update($, runAtom, () => null)
     try {
       // a pane left open by the copy this one replaces
       await $.ui.close({ id: GAME_PANE })
@@ -313,19 +410,13 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  // the runner game posts its high score when a run ends, and a close when the person presses q
+  // the terminal runner posts its high score when a run ends; both games post a close when the
+  // person presses q, and the desktop's key strip posts each jump
   on('ui.message', async ($, e, next) => {
-    const data = e.data as { best?: unknown; close?: unknown } | null
+    const data = e.data as { best?: unknown; close?: unknown; jump?: unknown } | null
     if (data?.close === true) await closeGame($)
-    const best = typeof data?.best === 'number' && Number.isFinite(data.best) ? Math.min(Math.floor(data.best), 99999) : 0
-    if (best > (await read($, bestAtom))) {
-      await update($, bestAtom, () => best)
-      try {
-        await $.store.set('best', best)
-      } catch {
-        // the score still shows this session
-      }
-    }
+    if (data?.jump === true) await pressJump($)
+    if (typeof data?.best === 'number' && Number.isFinite(data.best)) await saveBest($, data.best)
 
     return next(e)
   })
@@ -334,7 +425,9 @@ export const register: Register = (on, options) => {
   on('ui.close', async ($, e, next) => {
     if (e.id === GAME_PANE) {
       S.isPaneOpen = false
+      stopGameTimer()
       await update($, gameAtom, () => false)
+      await update($, runAtom, () => null)
     }
 
     return next(e)
@@ -376,8 +469,15 @@ export const register: Register = (on, options) => {
   }).catch(($, e, next) => next(e))
 
   on('ui.render', { component: 'Pane', requestId: GAME_PANE }, async ($, e) => {
-    const { Box, Text, ...rest } = $.ui.resolve(e)
-    const Client = 'Client' in rest ? rest.Client : null
+    const els = $.ui.resolve(e)
+    const { Box, Text } = els
+    // the terminal's element table holds an empty Svg: only the other surfaces draw one
+    if (e.surface !== 'terminal' && 'Svg' in els) {
+      const run = await read($, runAtom)
+
+      return run ? sceneView($, els, e.surface, run, e.props.bodyColumns) : <Box />
+    }
+    const Client = 'Client' in els ? els.Client : null
     if (!Client) {
       return (
         <Box>
@@ -390,7 +490,7 @@ export const register: Register = (on, options) => {
 
     return (
       <Box>
-        <Client key={`runner-${cols}`} module="./runner.tsx" props={{ best, cols, costume, start: Math.floor(now / 60000) }} width={cols} />
+        <Client key={`runner-${cols}`} module="./runner.tsx" props={{ best, cols, costume: S.costume, start: Math.floor(now / 60000) }} width={cols} />
       </Box>
     )
   })
@@ -398,15 +498,19 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
 
-    const { Box, Button, Text, ...rest } = $.ui.resolve(e)
-    const Client = 'Client' in rest ? rest.Client : null
-    const [usage, cacheRaw, now, phase, best, gameOpen] = await Promise.all([
+    const els = $.ui.resolve(e)
+    const { Box, Button, Text } = els
+    const Client = 'Client' in els ? els.Client : null
+    // the terminal's element table holds an empty Svg: only the other surfaces draw one
+    const isSvg = e.surface !== 'terminal' && 'Svg' in els
+    const [usage, cacheRaw, now, phase, best, gameOpen, run] = await Promise.all([
       read($, usageAtom),
       read($, cacheAtom),
       $.clock.now(),
       read($, handoffAtom),
       read($, bestAtom),
       read($, gameAtom),
+      read($, runAtom),
     ])
     const cache = cacheRaw && typeof cacheRaw.at === 'number' ? cacheRaw : null
     const wide = e.props.bodyColumns >= 100
@@ -495,12 +599,12 @@ export const register: Register = (on, options) => {
 
     // the play control sits beside the handoff slot: it pulses while Claude works, and a press
     // opens or closes the game
-    const canPlay = buddy === 'game' && Client !== null && e.props.bodyColumns >= 30
+    const canPlay = buddy === 'game' && (isSvg || Client !== null) && e.props.bodyColumns >= 30
     const beat = Math.floor(Math.max(0, now - (S.workStart || now)) / BUDDY_TICK_MS)
     const playGlyph = gameOpen ? '■' : working && beat % 2 === 1 ? '▷' : '▶'
     const playLabel = e.props.bodyColumns >= 70 ? `${playGlyph} ${gameOpen ? 'close' : 'play'}` : playGlyph
     const play = canPlay ? (
-      <Button key="play" label={playLabel} plain dimColor={!working && !gameOpen} onPress={() => toggleGame($)} />
+      <Button key="play" label={playLabel} plain dimColor={!working && !gameOpen} onPress={() => toggleGame($, isSvg)} />
     ) : null
 
     const busy = phase === 'running'
@@ -542,13 +646,18 @@ export const register: Register = (on, options) => {
 
     // the game sits under the band when it has the rows for it, else in a pane of its own
     const gameCols = Math.min(e.props.bodyColumns, 56)
-    const isGameHere = gameOpen && canPlay && Client !== null && !S.isPaneOpen
-    const game =
-      isGameHere && Client ? (
-        <Box key="game" marginTop={e.props.maxRows >= 2 + GAME_ROWS ? 1 : 0}>
-          <Client key={`runner-${gameCols}`} module="./runner.tsx" props={{ best, cols: gameCols, costume, start: Math.floor(now / 60000) }} width={gameCols} />
+    const gameRows = isSvg ? GAME_ROWS.svg : GAME_ROWS.text
+    const isGameHere = gameOpen && canPlay && !S.isPaneOpen
+    let game: JSX.Element | null = null
+    if (isGameHere && isSvg && run) {
+      game = <Box key="game-slot" marginTop={e.props.maxRows >= 2 + gameRows ? 1 : 0}>{sceneView($, els, e.surface, run, e.props.bodyColumns)}</Box>
+    } else if (isGameHere && Client) {
+      game = (
+        <Box key="game" marginTop={e.props.maxRows >= 2 + gameRows ? 1 : 0}>
+          <Client key={`runner-${gameCols}`} module="./runner.tsx" props={{ best, cols: gameCols, costume: S.costume, start: Math.floor(now / 60000) }} width={gameCols} />
         </Box>
-      ) : null
+      )
+    }
 
     return (
       <Box flexDirection="column">

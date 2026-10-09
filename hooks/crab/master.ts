@@ -9,7 +9,9 @@ export type Rect = readonly [x: number, y: number, w: number, h: number, color: 
 /** Named groups of rects: `bd` the body and its costume, `la`/`lb` the leg pairs, the rest props. */
 export type Layers = Record<string, Rect[]>
 
-export type CostumeId = 'plain' | 'astronaut' | 'detective' | 'engineer' | 'chef' | 'racer' | 'pirate'
+import type { CostumeId } from '../../types'
+
+export type { CostumeId }
 
 export type Costume = {
   id: CostumeId

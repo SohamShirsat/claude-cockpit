@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'claude-code/testing'
+import { describe, expect, mock, test } from 'claude-code/testing'
 
 import type { Engine } from 'claude-code/testing'
 
@@ -171,10 +171,10 @@ const fakeRun = (repos: Fake[]) => (_$: unknown, e: Run) => {
 }
 
 // one session: its folder, the repos on disk, and what the band's calls on `$` answer
-const world = (on: (event: string, hook: (...args: never[]) => unknown) => unknown, cwd: string, repos: Fake[]) => {
+const world = (on: (event: string, hook: (...args: never[]) => unknown) => unknown, cwd: string, repos: Fake[], withClock = true) => {
   const seen = { toasts: [] as string[], opened: [] as string[], closed: [] as string[] }
   const hook = on as (event: string, hook: (...args: any[]) => unknown) => unknown
-  hook('clock.now', () => ({ value: 0 }))
+  if (withClock) hook('clock.now', () => ({ value: 0 }))
   hook('session.cwd', () => ({ value: cwd }))
   hook('env.get', () => ({ value: '/home/x' }))
   hook('fs.write', () => ({ value: undefined }))
@@ -228,8 +228,8 @@ describe('while working', () => {
   })
 })
 
-describe('game', () => {
-  for (const surface of SURFACES) {
+describe('game (terminal: half-block pixels in a Client)', () => {
+  for (const surface of ['terminal'] as const) {
     test(`the play control opens it, a run is played, q closes it (${surface})`, async ($, on) => {
       world(on as never, '/work/none', [])
       const ui = await band($, surface, { isWorking: true, bodyColumns: 100 })
@@ -293,7 +293,7 @@ describe('game', () => {
     })
   }
 
-  for (const surface of SURFACES) {
+  for (const surface of ['terminal'] as const) {
     test(`the runner is the crab, wearing the costume that was asked for (${surface})`, async ($, on) => {
       world(on as never, '/work/none', [])
       const ui = await band($, surface, { isWorking: true, bodyColumns: 100 })
@@ -342,6 +342,86 @@ describe('game', () => {
     await ui.press({ key: 'play' })
     await ui.unmount()
   })
+})
+
+describe('game (desktop: a vector scene, a key strip, and a run the hooks module owns)', () => {
+  const open = async ($: Engine, on: unknown, surface: 'desktop' | 'vscode' = 'desktop', props: Record<string, unknown> = {}) => {
+    const clock = mock.clock(on as never)
+    mock.store(on as never)
+    const seen = world(on as never, '/work/none', [], false)
+    const all = { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 100, scroll: { bodyRows: 11 }, view: {}, ...props }
+    const ui = (await $.ui.mount({ plugin: 'status-band', surface, component: 'AbovePrompt', props: all as never })) as Awaited<ReturnType<typeof band>>
+    await ui.press({ key: 'play' })
+
+    return { clock, seen, ui }
+  }
+  const svg = async (ui: Awaited<ReturnType<typeof band>>) => {
+    const el = await ui.find({ type: 'Svg' })
+    return String((el as { props?: { source?: string } } | undefined)?.props?.source ?? '')
+  }
+
+  test('play opens a picture of the crab, a header, and the key strip under it', async ($, on) => {
+    const { ui } = await open($, on)
+    const source = await svg(ui)
+    expect(source).toContain('<svg')
+    expect(source).toContain('#D97757')
+    expect(await ui.find({ type: 'Text', text: /plain · best 0000/ })).toBeDefined()
+    expect(await ui.find({ type: 'Client', key: 'strip' })).toBeDefined()
+    await ui.press({ key: 'play' })
+    expect(await ui.find({ type: 'Svg' })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('a press on the strip starts the run, the picture moves, and it ends on the first rock', async ($, on) => {
+    const { clock, ui } = await open($, on)
+    const before = await svg(ui)
+    await ui.post({ jump: true }, { in: 'strip' } as never)
+    await clock.advance(70 * 12)
+    expect(await ui.find({ type: 'Text', text: /score 00\d\d/ })).toBeDefined()
+    expect(await svg(ui)).not.toBe(before)
+
+    // never jumping: a rock reaches the crab
+    await clock.advance(70 * 120)
+    expect(await ui.find({ type: 'Text', text: /game over/ })).toBeDefined()
+    // belly up and grey: the crab is drawn rotated
+    expect(await svg(ui)).toContain('rotate(180')
+
+    // a press retries; q closes it all
+    await ui.post({ jump: true }, { in: 'strip' } as never)
+    await clock.advance(70 * 3)
+    expect(await ui.find({ type: 'Text', text: /score 00/ })).toBeDefined()
+    await ui.post({ close: true }, { in: 'strip' } as never)
+    expect(await ui.find({ type: 'Svg' })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('the high score survives the run that set it', async ($, on) => {
+    const { clock, ui } = await open($, on)
+    await ui.post({ jump: true }, { in: 'strip' } as never)
+    await clock.advance(70 * 200)
+    expect(await ui.find({ type: 'Text', text: /best 00[1-9]\d/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('where the surface cannot hold a key strip there is a jump button instead', async ($, on) => {
+    const { ui } = await open($, on, 'vscode')
+    expect(await ui.find({ type: 'Svg' })).toBeDefined()
+    expect(await ui.find({ type: 'Client' })).toBeUndefined()
+    expect(await ui.find({ type: 'Button', key: 'jump' })).toBeDefined()
+    await ui.unmount()
+  })
+
+  for (const cols of [40, 100, 200]) {
+    test(`the picture follows the band width and keeps its shape (${cols} columns)`, async ($, on) => {
+      const { ui } = await open($, on, 'desktop', { bodyColumns: cols })
+      const el = (await ui.find({ type: 'Svg' })) as { props?: { width?: number; height?: number } } | undefined
+      const { width = 0, height = 0 } = el?.props ?? {}
+      expect(width).toBeLessThanOrEqual(540)
+      expect(width).toBeGreaterThanOrEqual(150)
+      expect(Math.abs(width / height - 5)).toBeLessThan(0.05)
+      await ui.unmount()
+    })
+  }
 })
 
 describe('band layout', () => {

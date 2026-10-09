@@ -3,7 +3,7 @@
 // sprites in master.ts: the body, the hat, and one prop that moves between two frames.
 // Pure data and functions: no `$`, no timers.
 
-import type { CostumeId } from './master'
+import type { CostumeId } from '../../types'
 
 /** A pixel: a color, or null for empty. */
 export type Px = string | null
