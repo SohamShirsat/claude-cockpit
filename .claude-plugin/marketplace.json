@@ -1,0 +1,13 @@
+{
+  "name": "soham-mods",
+  "owner": {
+    "name": "Soham"
+  },
+  "plugins": [
+    {
+      "name": "status-band",
+      "source": "./",
+      "description": "Compact band above the prompt: context %, cache, limits, handoff, plus a tokenless mascot and mini game while Claude works."
+    }
+  ]
+}

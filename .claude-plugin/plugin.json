@@ -1,0 +1,32 @@
+{
+  "name": "status-band",
+  "version": "0.4.3",
+  "description": "Compact text band above the prompt: context %, cache countdown, 5h/7d limits, one-click handoff, and a tokenless mascot + mini game while Claude works.",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "cacheTtlMinutes": {
+      "type": "string",
+      "title": "Prompt cache lifetime",
+      "description": "Minutes the prompt cache stays warm after a response (60 = extended cache, 5 = standard).",
+      "options": [
+        "5",
+        "60"
+      ],
+      "default": "60"
+    },
+    "buddy": {
+      "type": "string",
+      "title": "While Claude works",
+      "description": "game = animated mascot, plus a runner game offered on long turns; mascot = animation only; off = nothing. Drawn on your machine, never spends tokens.",
+      "options": [
+        "game",
+        "mascot",
+        "off"
+      ],
+      "default": "game"
+    }
+  },
+  "author": {
+    "name": "Soham"
+  }
+}
