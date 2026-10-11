@@ -2,6 +2,10 @@
 
 What changed in each version, newest first. (The plugin's version lives in `.claude-plugin/plugin.json`.)
 
+## 0.13.19
+
+- Maintainer notes moved to `.claude/CLAUDE.md` (a `CLAUDE.md` at the plugin root is flagged by the validator).
+
 ## 0.13.18
 
 - README: the privacy section now lists every call the mod makes in one table.

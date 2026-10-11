@@ -75,6 +75,7 @@ A hold is not a rejection, but each new version can be held again. We reduce the
 - Repo under 50 MiB archived / 256 MiB unpacked, under 10,000 entries; **plugin at most 512 files**.
 - **Every non-image, non-font file under 256 KiB.** Dev-only type stubs (`.claude-plugin/types/**`, about 1.4 MB) are git-ignored for this reason; keep them out of git.
 - Only text, SVG, complete PNG/JPEG/GIF/WebP and font files. No `.pdf`, `.zip`, `.ico`, executables.
+- **No `CLAUDE.md` or `AGENTS.md` at the plugin root** (validator warning: not loaded as context). The maintainer instructions live in `.claude/CLAUDE.md`.
 - No symlinks, submodules, LFS pointers, `.DS_Store`, `Thumbs.db`, `__MACOSX`.
 - README of at least 40 words (ours is long, keep it) and a LICENSE (MIT, in the repo).
 - **Icon**: `.claude-plugin/icon.png`, square PNG 512-2048 px, under 2 MB. The listing takes the icon only once, at the first save/submit: changing the file later does not change the listing.
