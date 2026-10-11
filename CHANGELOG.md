@@ -2,6 +2,11 @@
 
 What changed in each version, newest first. (The plugin's version lives in `.claude-plugin/plugin.json`.)
 
+## 0.13.18
+
+- README: the privacy section now lists every call the mod makes in one table.
+- Maintainers: `docs/DIRECTORY-COMPLIANCE.md` (the directory's rules and what was promised), `CLAUDE.md`, and `scripts/preflight.py`, which checks the rules before each push.
+
 ## 0.13.17
 
 - `privacyPolicyUrl` in the manifest points at the README's privacy section.

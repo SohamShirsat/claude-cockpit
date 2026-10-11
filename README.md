@@ -302,6 +302,19 @@ Cockpit is a *mod*: code that runs inside Claude Code on your machine. Everythin
 
 The conversation goes nowhere else: no network call exists. Handoff never runs on its own. The band, the mascot and the game make no model call and cost no tokens.
 
+**Every Claude Code call the mod makes** (the full list; nothing else is used):
+
+| call | what for |
+| --- | --- |
+| `$.session.usage`, `$.session.cwd`, `$.session.turns` | the band's numbers; the working folder and turn count for Handoff |
+| `$.clock.now`, `$.clock.after`, `$.clock.every` | timers: the cache countdown, the mascot, the game's steps |
+| `$.ui.resolve`, `$.ui.invalidate`, `$.ui.open`, `$.ui.close`, `$.ui.toast` | drawing the band and the game pane, and short notices |
+| `$.store.get`, `$.store.set` | your game best score |
+| `$.fs.read`, `$.fs.write` | the trace log and the handoff note in `~/.claude` (nothing else is read or written) |
+| `$.env.get` | `HOME` only |
+| `$.process.run` | the four fixed `git` commands above, on Handoff only |
+| `$.model.fork`, `$.command.run`, `$.prompt.fill` | Handoff: the summary request, `/clear`, and filling the prompt box |
+
 **Hooks it registers.** `session.start`, `session.end`, `session.measure`, `prompt.edit` and `prompt.submit` (to let Space and ↑ play the game while the game is open and the prompt box is empty; any other text passes through unchanged and is never stored), `turn.complete`, `tool.call` (observes only, to know when Claude is working; it never denies, changes or answers a tool call), `ui.render`, `ui.press`, `ui.message` and `ui.close` (the band, the game pane and their buttons).
 
 **It does not** read your files other than the two logs above, collect personal data, store credentials, read any other environment variable, or send anything anywhere.
@@ -331,6 +344,8 @@ Where to look:
 | `assets/crab/` | the crab artwork (SVG, PNG, JSON) |
 | [`docs/TECHNICAL.md`](docs/TECHNICAL.md) | how it works inside: rules table, smooth motion, key routing |
 | [`CHANGELOG.md`](CHANGELOG.md) | what changed in each version |
+
+Before every push run `python3 scripts/preflight.py`: it checks the plugin against the plugin directory's rules (see [`docs/DIRECTORY-COMPLIANCE.md`](docs/DIRECTORY-COMPLIANCE.md)).
 
 To rebuild the pictures in `docs/` (they are made from the mod's own drawing code):
 
