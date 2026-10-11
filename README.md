@@ -204,7 +204,7 @@ After the Moon it comes round again from the Meadow, and the game keeps getting 
 
 ### On the desktop and in the terminal
 
-- **Desktop app:** a smooth picture, as wide as the band. Press **▶ play**, then **Space**. The first game of a session shows `J duck · K jump` in the picture, under the best score; after it the game is just the picture, and **K** (start, jump) and **J** (duck) still work.
+- **Desktop app:** a smooth picture, as wide as the band. Press **▶ play**, then **Space**. The first game of a session says its keys in the picture's message line (`K jump · J duck · …`, `bug! K jumps it, …`); after it the game is just the picture, and **K** (start, jump) and **J** (duck) still work.
 - **Terminal:** a pixel-block version (two pixels per character cell). It plays when the game is open **and the prompt box is empty**, so it never steals keys while you are typing.
 
 The rules are the same in both.

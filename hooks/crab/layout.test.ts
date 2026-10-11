@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { deskConfigFor, deskQuiet, FIELD, fresh, HINT_RUNS, lookFor, NOTES } from './game'
+import { deskConfigFor, deskQuiet, FIELD, FIRST_GAME_NOTES, FIRST_GAME_READY, fresh, HINT_RUNS, lookFor, NOTES } from './game'
 import type { Game } from './game'
 import { motionSvg, sceneSvg, SCENE } from './scene'
 
@@ -22,38 +22,56 @@ const draw = (g: Game, width: number) => sceneSvg(g, deskConfigFor(width), SIZE)
 const texts = (svg: string, cls: string) =>
   [...svg.matchAll(new RegExp(`<text class="${cls}[^"]*" x="([\\d.]+)" y="([\\d.]+)"[^>]*>(?:<[^>]*>)*([^<]*)</text>`, 'g'))].map(m => ({ x: Number(m[1]), y: Number(m[2]), text: m[3] ?? '' }))
 
-describe('the key hint of the first game', () => {
-  const hinted = (g: Game, width: number) => motionSvg({ states: [g], phase: 0, hints: true }, deskConfigFor(width), SIZE)
-  const hintOf = (svg: string) => texts(svg, 'bn').filter(t => t.text.includes('J duck'))
+describe('the keys of the first game, said in the strip', () => {
+  const first = (g: Game, width: number) => motionSvg({ states: [g], phase: 0, hints: true }, deskConfigFor(width), SIZE)
+  const said = (svg: string) => texts(svg, 'nt').map(t => t.text)
 
-  for (const width of WIDTHS) {
-    test(`at ${width} units wide it sits right-aligned under the best score, clear of the crab's side`, () => {
-      const g = game(width, 'play')
-      const [hint] = hintOf(hinted(g, width))
-      expect(hint).toBeDefined()
-      expect(hint?.text).toBe('J duck · K jump')
-      // under the scoreboard's row (y 9), at the right edge
-      expect(hint?.y).toBeGreaterThan(9)
-      // with a clear row of air between it and the best score (the text is 7 units tall)
-      expect((hint?.y ?? 0) - 9).toBeGreaterThanOrEqual(16)
-      expect(hint?.x).toBeGreaterThan(width - 10)
-      // its whole width (about 4.6 units a letter) stays right of the crab's jump column
-      expect((hint?.x ?? 0) - 15 * 4.6).toBeGreaterThan(60)
-      // the scoreboard is where it was
-      expect(texts(hinted(g, width), 'hd').length).toBe(texts(draw(g, width), 'hd').length)
-    })
-  }
-
-  test('is drawn only when asked: the picture of a later game has no hint', () => {
-    const g = game(FIELD.normal, 'play')
-    expect(hintOf(sceneSvg(g, deskConfigFor(FIELD.normal), SIZE))).toHaveLength(0)
-    expect(hintOf(hinted(g, FIELD.normal))).toHaveLength(1)
+  test('before the first run starts the strip says K jumps and J ducks; a later game says what it always said', () => {
+    const ready = game(FIELD.normal, 'ready')
+    expect(said(first(ready, FIELD.normal))).toEqual([FIRST_GAME_READY])
+    expect(FIRST_GAME_READY).toMatch(/K jump/)
+    expect(FIRST_GAME_READY).toMatch(/J duck/)
+    expect(said(draw(ready, FIELD.normal))).toEqual(['grab clouds, dodge or fix bugs'])
   })
 
-  test('steps aside while a stage title is up in the same row', () => {
-    const g = { ...game(FIELD.normal, 'play'), auto: true, stage: 1, stageAge: 3 }
-    const svg = hinted(g, FIELD.normal)
-    expect(hintOf(svg)).toHaveLength(0)
+  test('the first bug note names K, the moth note already names J, and a later game keeps the usual words', () => {
+    const bug = game(FIELD.normal, 'play', { note: NOTES.bug, noteAge: 2 })
+    expect(said(first(bug, FIELD.normal))).toEqual(['bug! K jumps it, or land on it to fix it'])
+    expect(said(draw(bug, FIELD.normal))).toEqual([NOTES.bug])
+    const moth = game(FIELD.normal, 'play', { note: NOTES.moth, noteAge: 2 })
+    expect(said(first(moth, FIELD.normal))).toEqual([NOTES.moth])
+    expect(NOTES.moth).toMatch(/J/)
+    // a note with nothing to say about keys is left alone
+    const twin = game(FIELD.normal, 'play', { note: NOTES.twin, noteAge: 2 })
+    expect(said(first(twin, FIELD.normal))).toEqual([NOTES.twin])
+  })
+
+  test('every first-game text fits the top row beside the scoreboard on a normal field, and drops to the middle on a narrow one', () => {
+    const cases: [string, Game, Game][] = [
+      [FIRST_GAME_READY, game(FIELD.normal, 'ready'), game(FIELD.min, 'ready')],
+      ...Object.values(FIRST_GAME_NOTES).map((text): [string, Game, Game] => [
+        text,
+        game(FIELD.normal, 'play', { note: Object.keys(FIRST_GAME_NOTES).find(k => FIRST_GAME_NOTES[k] === text) ?? '', noteAge: 2 }),
+        game(FIELD.min, 'play', { note: Object.keys(FIRST_GAME_NOTES).find(k => FIRST_GAME_NOTES[k] === text) ?? '', noteAge: 2 }),
+      ]),
+    ]
+    for (const [text, normalGame, narrowGame] of cases) {
+      const normal = texts(first(normalGame, FIELD.normal), 'nt')[0]
+      expect(normal?.text).toBe(text)
+      expect(normal?.y).toBe(9)
+      const half = (text.length * 4.6) / 2
+      expect((normal?.x ?? 0) - half).toBeGreaterThanOrEqual(CRAB_CLEAR)
+      expect((normal?.x ?? 0) + half).toBeLessThan(HUD_FROM(FIELD.normal))
+      const narrow = texts(first(narrowGame, FIELD.min), 'nt')[0]
+      expect(narrow?.text).toBe(text)
+      expect(narrow?.y).toBe(20)
+    }
+  })
+
+  test('nothing is drawn under the best score any more', () => {
+    const svg = first(game(FIELD.normal, 'play'), FIELD.normal)
+    expect(svg).not.toContain('J duck')
+    expect(texts(svg, 'bn')).toEqual([])
   })
 
   test('are for the first game of a session only', () => {

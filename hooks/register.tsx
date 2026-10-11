@@ -17,7 +17,7 @@ const runAtom = atom({ plugin: 'status-band', key: 'game' } as const, null)
 // the terminal's game lives in its Client: each press of the prompt's keys bumps this, and the Client acts on a change
 const signalAtom = atom({ plugin: 'status-band', key: 'jumpSignal' } as const, 0)
 
-const VERSION = '0.13.9'
+const VERSION = '0.13.11'
 // rows the game takes: the terminal's is a header, the five rows of the field and the ground;
 // the desktop's the one line of guidance (which is also the click target) and the picture (108 px)
 const GAME_ROWS = { text: 7, svg: 9 } as const
@@ -128,6 +128,9 @@ const S = {
   dims: new Set<string>(),
   bandId: '',
   overAt: 0,
+  // which key of the hidden J / K box was drawn last (to trace a change)
+  keysDrawn: '',
+  pressSeen: 0,
   // how many runs this session has finished: the keys are spelled out for the first game of a session only
   runs: 0,
   // the desktop's run: the hooks module owns it and steps it by the wall clock (`advance`); the picture
@@ -560,6 +563,7 @@ async function toggleGame($: Dollar, isSvg: boolean) {
   S.gameSurface = isSvg ? 'svg' : 'text'
   S.logged = 0
   S.pressed = 0
+  S.pressSeen = 0
   S.lastMove = ''
   S.drawnSeq = -1
   if (S.bandRows < 1 + rows) {
@@ -634,10 +638,19 @@ function sceneView($: Dollar, els: VectorEls, view: RunView, bodyColumns: number
   const { Box, Button, Svg } = els
   const width = Math.max(150, Math.min(SCENE_MAX_WIDTH, Math.floor(bodyColumns * SCENE_PX_PER_COL)))
   const height = Math.round((width * SCENE.h) / view.units)
+  // The buttons are drawn afresh once the session's first game is over (a new key, so the engine
+  // mounts new ones): the ones drawn while that game was opened stopped answering their hotkeys after
+  // it (0.13.9 trace: no press at all after the first game), while ones drawn after it answered for
+  // every game since (0.13.7 trace). Later games keep the same buttons.
+  const keysKey = S.runs >= 1 ? 'keys-hidden-2' : 'keys-hidden'
+  if (keysKey !== S.keysDrawn) {
+    S.keysDrawn = keysKey
+    void trace($, `keys drawn ${keysKey} runs=${S.runs}`)
+  }
 
   return (
     <Box key="game" flexDirection="column" position="relative">
-      <Box key="keys-hidden" position="absolute" top={0} left={0} width={0} height={0} overflow="hidden">
+      <Box key={keysKey} position="absolute" top={0} left={0} width={0} height={0} overflow="hidden">
         <Button key="duck" label="duck" hotkey="j" plain dimColor onPress={() => press($, 'duck', 'button')} />
         <Button key="jump" label="jump" hotkey="k" plain dimColor onPress={() => press($, 'jump', 'button')} />
       </Box>
@@ -677,6 +690,7 @@ export const register: Register = (on, options) => {
       // a missing store only means no saved high score
     }
     S.runs = 0
+    S.keysDrawn = ''
     startTicking($)
     const u = await $.session.usage()
     await update($, usageAtom, () => toUsage(u.context, u.rateLimits, u.cost))
@@ -725,6 +739,17 @@ export const register: Register = (on, options) => {
 
   // the terminal runner posts its high score when a run ends; both games post a close when the
   // person presses q, and the desktop's guidance line posts each jump
+  // every press of one of this plugin's own controls goes to the trace (the first few), so a dead key
+  // can be told from a key that never reached the plugin
+  on('ui.press', async ($, e, next) => {
+    if (S.gameSurface === 'svg' && e.plugin !== undefined && e.plugin.startsWith('status-band') && S.pressSeen < 40) {
+      S.pressSeen++
+      void trace($, `ui.press element=${e.element ?? '-'}`)
+    }
+
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
   on('ui.message', async ($, e, next) => {
     const data = e.data as { best?: unknown; close?: unknown; jump?: unknown; duck?: unknown; via?: unknown } | null
     if (data?.close === true) await closeGame($)

@@ -178,6 +178,19 @@ export const NOTES: Record<Kind | 'orb', string> = {
   orb: 'tests passing! grab the shield',
 }
 
+/**
+ * The first game of a session says its keys in the notes themselves (K jumps, J ducks): the words a
+ * note has instead of its usual ones, by the note's usual text. A note not named here stays as it is
+ * (the moth's already says J). Each must fit the top row beside the scoreboard.
+ */
+export const FIRST_GAME_NOTES: Readonly<Record<string, string>> = {
+  [NOTES.bug]: 'bug! K jumps it, or land on it to fix it',
+  [NOTES.pit]: 'segfault! K to jump the gap',
+}
+
+/** What the strip says before the first game of a session starts: the keys, then the aim. */
+export const FIRST_GAME_READY = 'K jump · J duck · grab clouds, fix bugs'
+
 export const NOTE_TICKS = 75
 
 const rand = (seed: number) => (seed * 16807) % 2147483647

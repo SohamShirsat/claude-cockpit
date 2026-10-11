@@ -10,7 +10,7 @@
 // carries on from the same moment, because every animation starts part-way in (`begin` < 0).
 
 import type { CostumeId, Game, Kind } from '../../types'
-import { POP_LIFE } from './game'
+import { FIRST_GAME_NOTES, FIRST_GAME_READY, POP_LIFE } from './game'
 import type { Config } from './game'
 import { layers, paintOrder } from './master'
 import type { Layers, Rect } from './master'
@@ -29,7 +29,7 @@ export type Plan = {
   phase: number
   /** ticks since the run ended, when it has: a crab already belly up carries on from where the fall had got to */
   overAge?: number
-  /** draw the key hint (the J and K keys) under the scoreboard: the first game of a session only */
+  /** the first game of a session: the notes say the keys (K jumps, J ducks), see `FIRST_GAME_NOTES` */
   hints?: boolean
 }
 
@@ -576,7 +576,7 @@ const hud = (c: Clock, states: Game[], w: number): string => {
 
 // ---- the whole scene -----------------------------------------------------------------------------
 
-/** What the strip says before a run starts, and when it ends (the keys are the hint under the scoreboard). */
+/** What the strip says before a run starts, and when it ends (the first game's keys are in these texts). */
 const READY_TEXT = 'grab clouds, dodge or fix bugs'
 const OVER_TEXT = 'GAME OVER'
 
@@ -597,14 +597,18 @@ const strip = (w: number, chars: number, letter: number) => {
 }
 
 /** The strip's text for a state: a note on its first sight of a kind, GAME OVER once the run ends. */
-const stripOf = (g: Game): { text: string; over: boolean } =>
-  g.mode === 'over' ? { text: OVER_TEXT, over: true } : { text: g.mode === 'ready' ? READY_TEXT : g.note, over: false }
+const stripOf = (g: Game, hints: boolean): { text: string; over: boolean } => {
+  if (g.mode === 'over') return { text: OVER_TEXT, over: true }
+  if (g.mode === 'ready') return { text: hints ? FIRST_GAME_READY : READY_TEXT, over: false }
+
+  return { text: hints ? (FIRST_GAME_NOTES[g.note] ?? g.note) : g.note, over: false }
+}
 
 /** The strip: the notes (dim ink) and GAME OVER (strong ink), each shown for the ticks it is the state's. */
-const note = (c: Clock, states: Game[], w: number): { dim: string; strong: string } => {
+const note = (c: Clock, states: Game[], w: number, hints: boolean): { dim: string; strong: string } => {
   const runs: { text: string; over: boolean; first: number; last: number }[] = []
   states.forEach((g, j) => {
-    const { text, over } = stripOf(g)
+    const { text, over } = stripOf(g, hints)
     const last = runs[runs.length - 1]
     if (text && last && last.text === text && last.last === j - 1) last.last = j
     else if (text) runs.push({ text, over, first: j, last: j })
@@ -644,17 +648,6 @@ const banner = (c: Clock, states: Game[], w: number): string => {
     .join('')
 }
 
-/** The first game's key hint, right-aligned under the best score with a clear row between (it steps aside for the stage title, which sits between them). */
-const HINT_TEXT = 'J duck · K jump'
-const HINT_Y = 27
-
-const keyHint = (c: Clock, states: Game[], w: number): string => {
-  const s = showing(c, states.map(g => !(g.auto && g.stage > 0 && g.stageAge >= 0)))
-  if (s.none) return ''
-
-  return `<text class="bn" x="${w - EDGE}" y="${HINT_Y}"${s.attr}>${s.anim}${HINT_TEXT}</text>`
-}
-
 /**
  * The scene for a stretch of play: where the first state is "now minus `phase` ticks", and the
  * rest are the steps after it. The picture is correct at its first moment and carries on from there
@@ -672,8 +665,8 @@ export const motionSvg = (plan: Plan, cfg: Config, size: { width: number; height
   parts.push(bursts(c, states, ground))
   parts.push(crabLive(c, states, cfg, ground))
   parts.push(crabLost(c, states, cfg, overAge, ground))
-  const lines = note(c, states, w)
-  parts.push(ink(c, states, 'dim', lines.dim + banner(c, states, w) + (hints ? keyHint(c, states, w) : '')))
+  const lines = note(c, states, w, hints === true)
+  parts.push(ink(c, states, 'dim', lines.dim + banner(c, states, w)))
   if (lines.strong) parts.push(ink(c, states, 'strong', lines.strong))
   parts.push(hud(c, states, w))
 

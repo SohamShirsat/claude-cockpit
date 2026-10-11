@@ -1,4 +1,4 @@
-import { HINT_RUNS } from './crab/game'
+import { FIRST_GAME_NOTES, FIRST_GAME_READY, NOTES } from './crab/game'
 import { describe, expect, mock, test } from 'claude-code/testing'
 
 import type { Engine } from 'claude-code/testing'
@@ -415,9 +415,13 @@ describe('game (desktop: a vector scene, one line of guidance that takes the key
     return source.includes('GAME OVER') && !source.includes('dur="7.68s"')
   }
 
-  // the J and K hint is drawn inside the picture, under the scoreboard, for the first game of a session only
-  const line = async (ui: Awaited<ReturnType<typeof band>>) => ((await svg(ui)).includes('J duck · K jump') ? 'hints' : '')
-  const hiddenRow = (ui: Awaited<ReturnType<typeof band>>) => ui.find({ type: 'Box', key: 'keys-hidden' })
+  // the first game says its keys inside the picture, in the strip beside the scoreboard (the ready text, the first notes)
+  const line = async (ui: Awaited<ReturnType<typeof band>>) => {
+    const source = await svg(ui)
+
+    return [FIRST_GAME_READY, ...Object.values(FIRST_GAME_NOTES)].some(t => source.includes(t)) ? 'hints' : ''
+  }
+  const hiddenRow = async (ui: Awaited<ReturnType<typeof band>>) => (await ui.find({ type: 'Box', key: 'keys-hidden' })) ?? (await ui.find({ type: 'Box', key: 'keys-hidden-2' }))
   // a key at the prompt box: Space is a jump (or a start, or a retry)
   const typeKey = (_ui: Awaited<ReturnType<typeof band>>, _text: string) => edit(engine, typed(' ') as never)
 
@@ -652,20 +656,39 @@ describe('game (desktop: a vector scene, one line of guidance that takes the key
     }
   }
 
-  test('the first game says the keys inside the picture, under the scoreboard; the band holds nothing for them', async ($, on) => {
+  test('the first game says its keys in the strip beside the scoreboard, and nothing is drawn under the best score', async ($, on) => {
     const { ui } = await open($, on)
+    // click on play: the ready text names K and J
+    expect(await svg(ui)).toContain(FIRST_GAME_READY)
     expect(await line(ui)).toBe('hints')
-    // the hint is drawn in the picture's own corner, under the best score
-    expect(await svg(ui)).toMatch(/<text class="bn" x="[\d.]+" y="27"[^>]*>(?:<[^>]*>)*J duck · K jump<\/text>/)
-    // the buttons that take the keys are always the same hidden ones
-    expect(await hiddenRow(ui)).toBeDefined()
+    expect(await svg(ui)).not.toMatch(/class="bn"/)
+    expect(await svg(ui)).not.toContain('J duck · K jump')
+    // the band holds nothing for them: no row, and the buttons that take the keys are the hidden ones
     expect(await ui.find({ type: 'Box', key: 'hints' })).toBeUndefined()
+    expect(await hiddenRow(ui)).toBeDefined()
     expect(await ui.find({ type: 'Button', key: 'duck' })).toMatchObject({ props: { hotkey: 'j' } })
     expect(await ui.find({ type: 'Button', key: 'jump' })).toMatchObject({ props: { hotkey: 'k' } })
     await ui.unmount()
   })
 
-  test('the picture takes the same room in every game: the first game and the second differ only in the hint', async ($, on) => {
+  test('the first bug note of the first game names K, and a later game says the usual words', async ($, on) => {
+    const { clock, ui } = await open($, on)
+    await typeKey(ui, ' ')
+    await clock.advance(40)
+    expect(await svg(ui)).toContain(FIRST_GAME_NOTES[NOTES.bug])
+    expect(await svg(ui)).not.toContain(NOTES.bug)
+    await lose(clock, ui, 1)
+    // the second game: ready text and notes are the usual ones
+    await ui.press({ key: 'jump' })
+    await clock.advance(40)
+    const second = await svg(ui)
+    expect(second).toContain(NOTES.bug)
+    expect(second).not.toContain('K jumps it')
+    expect(second).not.toContain(FIRST_GAME_READY)
+    await ui.unmount()
+  })
+
+  test('the picture takes the same room in every game', async ($, on) => {
     const { clock, ui } = await open($, on)
     const sizeOf = async () => {
       const el = (await ui.find({ type: 'Svg' })) as { props?: { width?: number; height?: number } } | undefined
@@ -680,9 +703,14 @@ describe('game (desktop: a vector scene, one line of guidance that takes the key
     await ui.unmount()
   })
 
-  test('once the first game is over the hint is gone from the picture but J and K still play', async ($, on) => {
+  test('once the first game is over the key words are gone from the strip but J and K still play', async ($, on) => {
     const { clock, seen, ui } = await open($, on)
+    // the buttons drawn for the first game are replaced by fresh ones once it is over, and kept after that
+    expect(await ui.find({ type: 'Box', key: 'keys-hidden' })).toBeDefined()
     await lose(clock, ui, 1)
+    expect(await ui.find({ type: 'Box', key: 'keys-hidden' })).toBeUndefined()
+    expect(await ui.find({ type: 'Box', key: 'keys-hidden-2' })).toBeDefined()
+    expect(seen.traced).toMatch(/keys drawn keys-hidden-2 runs=1/)
     expect(await svg(ui)).toContain('GAME OVER')
     expect(await line(ui)).toBe('')
     expect(await ui.find({ type: 'Input' })).toBeUndefined()

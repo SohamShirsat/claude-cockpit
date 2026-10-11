@@ -2,6 +2,19 @@
 
 What changed in each version, newest first. (The plugin's version lives in `.claude-plugin/plugin.json`.)
 
+## 0.13.11
+
+**The first game says its keys in its own messages, not under the score.**
+- Nothing is drawn under the `HI` score any more.
+- The first game of a session says the keys in the strip beside the scoreboard (the line that says `bug! jump it, or land on it to fix it`): when you press play it reads `K jump · J duck · grab clouds, fix bugs`; the first bug note is `bug! K jumps it, or land on it to fix it`, the pit note `segfault! K to jump the gap` (the moth note already names J).
+- From the second game on those messages are the usual ones, and the band is the same size in every game. The J and K keys work the same in every game (the hidden buttons, drawn afresh after the first game, as in 0.13.10).
+
+## 0.13.10
+
+**J and K again dead after the first game (0.13.9).**
+- The trace of a 0.13.9 session shows the first game answering J (`press start via=button`) and then no press at all, not even a refused one: the hidden J / K buttons drawn while the first game was open stopped answering their hotkeys once it was over. In 0.13.7 the buttons were drawn afresh at that moment (the row of hints was swapped for the hidden box) and then answered for every game after, so the hidden box now gets a new key after the first game (`keys-hidden` then `keys-hidden-2`) and the engine mounts new buttons. It is the same swap 0.13.7 made, without the visible row.
+- Two new trace lines for next time: `keys drawn <key> runs=<n>` when the box is drawn afresh, and `ui.press element=<key>` for each press the engine raises for the band's controls (a dead key can then be told from one that never reached the plugin).
+
 ## 0.13.9
 
 - The first game's key hint (`J duck · K jump`) sits lower, with a clear row of air between it and the `HI` score above it (it was crowding it).
