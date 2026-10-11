@@ -2,6 +2,10 @@
 
 What changed in each version, newest first. (The plugin's version lives in `.claude-plugin/plugin.json`.)
 
+## 0.13.17
+
+- `privacyPolicyUrl` in the manifest points at the README's privacy section.
+
 ## 0.13.16
 
 - The terminal game is drawn as `<els.Client module="./runner.tsx" …>`, the only place the name `Client` appears as an element, so the directory's scanner can read which file it loads. Nothing changes for you.
