@@ -17,7 +17,7 @@ const runAtom = atom({ plugin: 'status-band', key: 'game' } as const, null)
 // the terminal's game lives in its Client: each press of the prompt's keys bumps this, and the Client acts on a change
 const signalAtom = atom({ plugin: 'status-band', key: 'jumpSignal' } as const, 0)
 
-const VERSION = '0.13.15'
+const VERSION = '0.13.16'
 // rows the game takes: the terminal's is a header, the five rows of the field and the ground;
 // the desktop's the one line of guidance (which is also the click target) and the picture (108 px)
 const GAME_ROWS = { text: 7, svg: 9 } as const
@@ -807,7 +807,7 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'Pane', requestId: GAME_PANE }, async ($, e) => {
     const els = $.ui.resolve(e)
-    const { Box, Text, Client } = $.ui.resolve(e)
+    const { Box, Text } = els
     // the terminal's element table holds an empty Svg: only the other surfaces draw one
     if (e.surface !== 'terminal' && 'Svg' in els) {
       const run = await read($, runAtom)
@@ -815,7 +815,7 @@ export const register: Register = (on, options) => {
 
       return run ? sceneView($, els, run, e.props.bodyColumns) : <Box />
     }
-    if (!Client) {
+    if (!('Client' in els)) {
       return (
         <Box>
           <Text dimColor>The game needs a terminal or the desktop app.</Text>
@@ -827,7 +827,7 @@ export const register: Register = (on, options) => {
 
     return (
       <Box>
-        <Client key={`runner-${cols}`} module="./runner.tsx" props={{ best, cols, costume: S.costume, signal }} width={cols} />
+        <els.Client key={`runner-${cols}`} module="./runner.tsx" props={{ best, cols, costume: S.costume, signal }} width={cols} />
       </Box>
     )
   })
@@ -836,7 +836,7 @@ export const register: Register = (on, options) => {
     if (e.props.hasSurvey) return next(e)
 
     const els = $.ui.resolve(e)
-    const { Box, Button, Text, Client } = $.ui.resolve(e)
+    const { Box, Button, Text } = els
     // the terminal's element table holds an empty Svg: only the other surfaces draw one
     const isSvg = e.surface !== 'terminal' && 'Svg' in els
     const [usage, cacheRaw, now, phase, best, gameOpen, run, signal] = await Promise.all([
@@ -942,7 +942,7 @@ export const register: Register = (on, options) => {
 
     // the play control sits beside the handoff slot: it pulses while Claude works, and a press
     // opens or closes the game
-    const canPlay = buddy === 'game' && (isSvg || Client !== null) && e.props.bodyColumns >= 30
+    const canPlay = buddy === 'game' && (isSvg || 'Client' in els) && e.props.bodyColumns >= 30
     const beat = Math.floor(Math.max(0, now - (S.workStart || now)) / BUDDY_TICK_MS)
     const playGlyph = gameOpen ? '■' : working && beat % 2 === 1 ? '▷' : '▶'
     const playLabel = e.props.bodyColumns >= 70 ? `${playGlyph} ${gameOpen ? 'close' : 'play'}` : playGlyph
@@ -1003,10 +1003,10 @@ export const register: Register = (on, options) => {
     if (isGameHere && isSvg && run) {
       drawn($, run, now)
       game = <Box key="game-slot" marginTop={e.props.maxRows >= 2 + gameRows ? 1 : 0}>{sceneView($, els, run, e.props.bodyColumns)}</Box>
-    } else if (isGameHere && Client) {
+    } else if (isGameHere && 'Client' in els) {
       game = (
         <Box key="game" marginTop={e.props.maxRows >= 2 + gameRows ? 1 : 0}>
-          <Client key={`runner-${gameCols}`} module="./runner.tsx" props={{ best, cols: gameCols, costume: S.costume, signal }} width={gameCols} />
+          <els.Client key={`runner-${gameCols}`} module="./runner.tsx" props={{ best, cols: gameCols, costume: S.costume, signal }} width={gameCols} />
         </Box>
       )
     }
