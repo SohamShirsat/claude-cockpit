@@ -3,7 +3,7 @@
 // then screenshot each page (see docs/README.md).
 import { mkdirSync, writeFileSync } from 'node:fs'
 
-import { act, deskConfig, deskLine, fresh, lookFor, COSTUME_IDS } from '../hooks/crab/game'
+import { act, deskConfig, fresh, lookFor, COSTUME_IDS, FIRST_GAME_READY } from '../hooks/crab/game'
 import type { Game } from '../hooks/crab/game'
 import { crabGroup, sceneSvg } from '../hooks/crab/scene'
 import { STAGES } from '../hooks/crab/stages'
@@ -21,9 +21,6 @@ body{margin:0;background:#fbfaf8;font:14px -apple-system,BlinkMacSystemFont,'Seg
 .band{display:flex;justify-content:space-between;color:#85837d;font-size:15px;margin-bottom:10px}
 .band b{color:#2e7d32;margin-left:4px}.band .d{margin:0 6px}
 .band .r{color:#1f1e1d;display:flex;gap:22px}
-.keysrow{display:flex;justify-content:space-between;align-items:center;color:#85837d;font-size:15px;margin:0 0 4px}
-.keysrow .f{border:1px solid #d9d7d2;border-radius:7px;padding:2px 10px;min-width:150px;background:#f7f6f4}
-.keysrow .k{display:flex;gap:18px}.keysrow kbd{font:11px ui-monospace,Menlo,monospace;border:1px solid #d9d7d2;border-radius:5px;padding:0 5px;margin-right:6px}
 svg{display:block}
 .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;width:760px;padding:28px;box-sizing:border-box}
 .tile{background:#f0efed;border-radius:14px;padding:12px 8px 10px;text-align:center}
@@ -35,11 +32,11 @@ const W = 728
 const H = Math.round((W * 72) / deskConfig.width)
 const base = (g: Partial<Game>): Game => ({ ...act(fresh(377, 7, 'ready', lookFor('plain'), deskConfig), deskConfig), ...g })
 
-const panel = (g: Game, bandRow: boolean, quiet = false) => `<div class="panel">${
+const panel = (g: Game, bandRow: boolean) => `<div class="panel">${
   bandRow
     ? `<div class="band"><div>ctx<b>8%</b><span class="d">·</span>cache<b>55m</b><span class="d">·</span>5h<b>29%</b><span class="d">·</span>7d<b>46%</b></div><div class="r"><span>■ close</span><span>⤴ Handoff</span></div></div>`
     : ''
-}<p class="keysrow"><span class="f">${deskLine(g, 'any key', quiet).trim() || '&nbsp;'}</span><span class="k">${quiet ? '' : '<span><kbd>J</kbd>▼ duck</span><span><kbd>K</kbd>▲ jump</span>'}</span></p>${sceneSvg(g, deskConfig, { width: W, height: H })}</div>`
+}${sceneSvg(g, deskConfig, { width: W, height: H })}</div>`
 
 const bug = (id: number, x: number, kind: Game['obs'][number]['kind'], w: number, h: number, base = 0): Game['obs'][number] => ({ id, x, w, h, base, tall: kind === 'beetle', kind })
 const playing = base({
@@ -60,7 +57,7 @@ const playing = base({
   note: 'moth! duck under it with ↓ or J',
   noteAge: 12,
 })
-const ready = { ...fresh(377, 7, 'ready', lookFor('astronaut'), deskConfig) }
+const ready = { ...fresh(377, 7, 'ready', lookFor('astronaut'), deskConfig), note: FIRST_GAME_READY, noteAge: 0 }
 const over = base({ mode: 'over', score: 95.2, grabbed: 1, off: 300, obs: [bug(1, 48, 'bug', 12, 9)], clouds: [{ id: 2, x: 190, w: 16, h: 40 }] })
 
 writeFileSync(
@@ -68,7 +65,7 @@ writeFileSync(
   `<!doctype html><meta charset=utf-8><style>${CSS}</style><body><div class="wrap">
 <div class="cap">Playing: jump, fix or duck the bugs</div>${panel(playing, true)}
 <div class="cap">Waiting to start</div>${panel(ready, false)}
-<div class="cap">Game over (and every run, once you know the keys: the line and the J / K labels go quiet)</div>${panel(over, false, true)}</div>
+<div class="cap">Game over (from the second game on, the key hints go quiet)</div>${panel(over, false)}</div>
 <script>addEventListener('load',()=>document.querySelectorAll('svg').forEach(s=>{if(s.pauseAnimations){s.pauseAnimations();s.setCurrentTime(0.02)}}))</script>`,
 )
 
@@ -83,7 +80,7 @@ writeFileSync(`${out}/costumes.html`, `<!doctype html><meta charset=utf-8><style
 
 // ---- the band on its own: what the numbers look like, and the handoff buttons ----
 const BAND_CSS = `
-.row{display:flex;justify-content:space-between;align-items:center;background:#f0efed;border-radius:14px;padding:13px 18px;margin-bottom:10px;font-size:16px;color:#85837d}
+.row{display:flex;justify-content:space-between;align-items:center;gap:20px;background:#f0efed;border-radius:14px;padding:13px 18px;margin-bottom:10px;font-size:16px;color:#85837d}
 .row .m{display:flex;gap:6px;align-items:baseline}.row .m b{margin-left:4px}.row .d{margin:0 4px}
 .g{color:#2e7d32}.y{color:#b26a00}.r{color:#c62828}
 .row .r2{display:flex;gap:22px;color:#1f1e1d;align-items:center}
@@ -98,11 +95,11 @@ const metrics = (parts: string[]) => `<div class="m">${parts.join('<span class="
 const bandRow = (m: string[], right: string) => `<div class="row">${metrics(m)}<div class="r2">${right}</div></div>`
 const bandPage = `<!doctype html><meta charset=utf-8><style>${CSS}${BAND_CSS}</style><body><div class="wrap">
 <div class="cap">Calm: plenty of room, cache warm, limits low</div>
-${bandRow([cell('ctx', '12%', 'g', '24.0k/200k'), cell('cache', '58m', 'g', '91% hit'), cell('5h', '18%', 'g', '↻3h 20m'), cell('7d', '31%', 'g', '↻4d 2h')], '<span>⤴ Handoff</span>')}
+${bandRow([cell('ctx', '12%', 'g', '24.0k/200k'), cell('cache', '58m', 'g', '91% hit'), cell('5h', '18%', 'g', '↻5:44pm (3h 20m)'), cell('7d', '31%', 'g', '↻4d 2h')], '<span>⤴ Handoff</span>')}
 <div class="cap">Getting full: time to think about a handoff</div>
-${bandRow([cell('ctx', '72%', 'y', '144k/200k'), cell('cache', '9m', 'y', '88% hit'), cell('5h', '64%', 'y', '↻1h 05m'), cell('7d', '47%', 'g', '↻2d 6h')], '<span>⤴ Handoff</span>')}
+${bandRow([cell('ctx', '72%', 'y', '144k/200k'), cell('cache', '9m', 'y', '88% hit'), cell('5h', '64%', 'y', '↻2:10pm (1h 05m)'), cell('7d', '47%', 'g', '↻2d 6h')], '<span>⤴ Handoff</span>')}
 <div class="cap">Almost out: hand off now</div>
-${bandRow([cell('ctx', '91%', 'r', '182k/200k'), cell('cache', '1m', 'r', '90% hit'), cell('5h', '93%', 'r', '↻22m'), cell('7d', '66%', 'y', '↻1d 9h')], '<span>⤴ Handoff</span>')}
+${bandRow([cell('ctx', '91%', 'r', '182k/200k'), cell('cache', '1m', 'r', '90% hit'), cell('5h', '93%', 'r', '↻12:27pm (22m)'), cell('7d', '66%', 'y', '↻1d 9h')], '<span>⤴ Handoff</span>')}
 <div class="cap">Handoff, step 1: one click asks, a second click confirms</div>
 ${bandRow([cell('ctx', '72%', 'y'), cell('cache', '9m', 'y'), cell('5h', '64%', 'y'), cell('7d', '47%', 'g')], '<span class="conf">✓ Confirm handoff?</span>')}
 <div class="cap">While Claude works: mascot and timer, plus the play button</div>

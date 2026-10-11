@@ -17,7 +17,7 @@ const runAtom = atom({ plugin: 'status-band', key: 'game' } as const, null)
 // the terminal's game lives in its Client: each press of the prompt's keys bumps this, and the Client acts on a change
 const signalAtom = atom({ plugin: 'status-band', key: 'jumpSignal' } as const, 0)
 
-const VERSION = '0.13.11'
+const VERSION = '0.13.13'
 // rows the game takes: the terminal's is a header, the five rows of the field and the ground;
 // the desktop's the one line of guidance (which is also the click target) and the picture (108 px)
 const GAME_ROWS = { text: 7, svg: 9 } as const
@@ -61,6 +61,15 @@ const until = (iso: string | undefined, now: number) => {
   if (mins >= 1440) return `${Math.floor(mins / 1440)}d${Math.floor((mins % 1440) / 60)}h`
   if (mins >= 60) return `${Math.floor(mins / 60)}h${String(mins % 60).padStart(2, '0')}m`
   return `${mins}m`
+}
+
+// the wall-clock time a window ends, in the machine's own zone: 3:40pm (the 5-hour window moves, so the time is the useful part)
+const clockAt = (iso: string | undefined) => {
+  const t = iso ? Date.parse(iso) : NaN
+  if (Number.isNaN(t)) return ''
+  const d = new Date(t)
+  const h = d.getHours() % 12 || 12
+  return `${h}:${String(d.getMinutes()).padStart(2, '0')}${d.getHours() < 12 ? 'am' : 'pm'}`
 }
 
 const level = (pct: number) => (pct >= 85 ? 'error' : pct >= 60 ? 'warning' : 'success')
@@ -720,13 +729,13 @@ export const register: Register = (on, options) => {
 
   // Space and ↑ play while the game is open and the prompt box is empty, without a click on the game
   // first: the box takes them as edits, so they are read here and not typed. Any other text, and the
-  // box behaves as ever. The first few edits while the game is open go to the trace, to show what
-  // the box really hands over.
+  // box behaves as ever. The first few edits while the game is open go to the trace, as a game key or
+  // a pass: never the text itself.
   on('prompt.edit', async ($, e, next) => {
     const move = await gameKey($, e)
     if (S.logged < 12 && e.text === '' && (await read($, gameAtom))) {
       S.logged++
-      void trace($, `edit key=${JSON.stringify(e.key ?? null)} input=${JSON.stringify(e.inputText)} game=${move ?? 'pass'}`)
+      void trace($, move ? `edit game key=${move}` : 'edit passed to the prompt')
     }
     if (move) {
       await pressKeys($, move)
@@ -911,9 +920,13 @@ export const register: Register = (on, options) => {
     )
 
     // limits
+    // the 5-hour window has no fixed schedule, so it always shows the time it ends (and the wait when there is room);
+    // the weekly one keeps its countdown on wide bands only
     const limitCell = (label: string, l: { percent: number; resetsAt?: string } | undefined) => {
       if (!l) return null
-      const reset = wide ? `↻${until(l.resetsAt, now)}` : ''
+      const wait = until(l.resetsAt, now)
+      const at = label === '5h' ? clockAt(l.resetsAt) : ''
+      const reset = at ? `↻${at}${wide && wait ? ` (${wait})` : ''}` : wide && wait ? `↻${wait}` : ''
       return (
         <Box key={label} gap={1}>
           <Text dimColor>{label}</Text>

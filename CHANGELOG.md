@@ -2,6 +2,22 @@
 
 What changed in each version, newest first. (The plugin's version lives in `.claude-plugin/plugin.json`.)
 
+## 0.13.13
+
+**Ready for the Claude directory: privacy page, fresh pictures.**
+- README: a new "Privacy, and what this plugin runs" section that lists everything the mod reads, writes and sends.
+- The trace log no longer records the characters typed into the prompt box while the game is open; it notes only "game key" or "passed to the prompt".
+- `displayName` is "Claude Cockpit" (the plugin's name stays `status-band`).
+- The pictures in `docs/` are rebuilt from the current game: no key field, the scoreboard in the picture, the 5-hour reset shown as a clock time. `scripts/make-docs.ts` works again.
+
+## 0.13.12
+
+**The 5-hour limit shows when it resets.**
+- Next to `5h 32%` the band now shows the clock time the window ends, small and dim: `5h 32% ↻5:44pm`. The 5-hour window has no fixed schedule, so the time is the useful part.
+- It shows at every width. (The old `↻` countdown only appeared at 100+ columns, and the desktop band is about 95, so it never showed there.) On a wide band the wait follows in brackets: `↻5:44pm (2h14m)`.
+- The weekly `7d` keeps its countdown on wide bands only, since that reset is on a known schedule.
+- No reset time from the app: no stray `↻` is drawn.
+
 ## 0.13.11
 
 **The first game says its keys in its own messages, not under the score.**

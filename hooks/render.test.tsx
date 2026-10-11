@@ -928,3 +928,38 @@ describe('band layout', () => {
     await ui.unmount()
   })
 })
+
+describe('limits', () => {
+  // 2026-10-12 10:00 UTC is a fixed moment; the 5-hour window ends 2h14m later
+  const NOW = Date.parse('2026-10-12T10:00:00Z')
+  const END = new Date(NOW + (2 * 60 + 14) * 60000)
+  const hh = END.getHours() % 12 || 12
+  const clock = `${hh}:${String(END.getMinutes()).padStart(2, '0')}${END.getHours() < 12 ? 'am' : 'pm'}`
+  const limits = [
+    { kind: 'five_hour', percentUsed: 32, resetsAt: END.toISOString() },
+    { kind: 'seven_day', percentUsed: 12, resetsAt: new Date(NOW + 3 * 86400000).toISOString() },
+  ]
+
+  const open = async ($: Engine, on: (name: string, fn: (...a: never[]) => unknown) => void, bodyColumns: number) => {
+    world(on as never, '/work/none', [], false)
+    on('clock.now', () => ({ value: NOW }))
+    on('session.start', (_$, e) => ({ cwd: (e as { cwd: string }).cwd }))
+    on('session.usage', () => ({ value: { startedAt: NOW, context: { window: 200000 }, rateLimits: limits } }))
+    await $.session.start({ cwd: '/work/none', surface: 'desktop' } as never)
+    return band($, 'desktop', { bodyColumns })
+  }
+
+  for (const cols of [60, 95, 99, 100, 160]) {
+    test(`5h shows the percent and the clock time it resets at ${cols} columns`, async ($, on) => {
+      const ui = await open($, on as never, cols)
+      const tree = JSON.stringify(await ui.drawn())
+      expect(tree).toContain('5h')
+      expect(tree).toContain('"32","%"')
+      expect(tree).toContain(`↻${clock}`)
+      // the countdown and the weekly reset only fit on a wide band
+      expect(tree.includes('(2h14m)')).toBe(cols >= 100)
+      expect(tree.includes('↻3d0h')).toBe(cols >= 100)
+      await ui.unmount()
+    })
+  }
+})

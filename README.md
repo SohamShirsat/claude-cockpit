@@ -28,6 +28,7 @@ Works in the **Claude Code desktop app** and in the **terminal**. Free and open 
 - [Setup](#setup)
 - [Settings](#settings)
 - [Troubleshooting](#troubleshooting)
+- [Privacy, and what this plugin runs](#privacy-and-what-this-plugin-runs)
 - [For developers](#for-developers)
 
 ---
@@ -35,10 +36,10 @@ Works in the **Claude Code desktop app** and in the **terminal**. Free and open 
 ## Reading the band
 
 ```
-ctx 72%  144k/200k  ·  cache 9m  88% hit  ·  5h 64%  ↻1h 05m  ·  7d 47%  ↻2d 6h          ⤴ Handoff
+ctx 72%  144k/200k  ·  cache 9m  88% hit  ·  5h 64%  ↻2:10pm (1h 05m)  ·  7d 47%  ↻2d 6h          ⤴ Handoff
 ```
 
-Every number is **green** when things are fine, **amber** from 60 %, and **red** from 85 %. (Cache uses time instead: green above 10 minutes, amber above 2, red below.) On a narrow window the band shows just the main numbers; make the window wider to see the extra detail (`144k/200k`, `88% hit`, `↻1h 05m`).
+Every number is **green** when things are fine, **amber** from 60 %, and **red** from 85 %. (Cache uses time instead: green above 10 minutes, amber above 2, red below.) On a narrow window the band shows just the main numbers; make the window wider to see the extra detail (`144k/200k`, `88% hit`, the `(1h 05m)` wait).
 
 ### `ctx`: how full the chat is
 
@@ -70,7 +71,7 @@ Claude plans don't give you unlimited use; they give you allowances that refill 
 | **7d** | the **weekly limit** | A separate allowance for the whole week. Heavy users can hit this even if no single 5-hour stretch was full. |
 | **spend** | the **spending cap** | Only appears if your account has an extra-usage spending limit set. |
 
-The `↻1h 05m` beside each is the **time until it resets**. So `5h 93% ↻22m` reads: "I've used 93 % of this window, and it refills in 22 minutes", which means you can wait it out instead of burning through the rest.
+The `↻` beside each says **when it resets**. The 5-hour window has no fixed schedule, so it shows the clock time it ends, with the wait in brackets on a wide band: `5h 93% ↻12:27pm (22m)` reads "I've used 93 % of this window, and it refills at 12:27pm, in 22 minutes", which means you can wait it out instead of burning through the rest. The weekly `7d` shows a countdown (`↻2d 6h`) on wide bands.
 
 **Why you care:** you find out *before* you are cut off, and you can see whether it is worth waiting for a reset. A heavy afternoon can be paced around the `5h` number; a heavy week around `7d`.
 
@@ -130,7 +131,7 @@ One extra request to Claude (the summary). Because the band reads the chat throu
 | --- | --- | --- |
 | `ctx` amber or red | The chat is getting full; Claude may get vaguer | Finish the thought you are on, then **Handoff** |
 | `cache` low (or `–`) and you're about to leave | The next message will be a cold one | Hand off **now** while it's cheap, or accept that the first message back is slower |
-| `5h` red, with `↻22m` | You're nearly out of this 5-hour window | Wait for the reset, or switch to lighter tasks |
+| `5h` red, with `↻12:27pm (22m)` | You're nearly out of this 5-hour window | Wait for the reset, or switch to lighter tasks |
 | `7d` amber on a Tuesday | You're using the week's allowance fast | Pace yourself: shorter chats, fewer huge file reads |
 | Claude has been working for minutes | Nothing is wrong; it's a long task | Press **▶ play**, or step away |
 | Switching to a different task | The old chat's context is just noise now | **Handoff** (or just clear), and start the new thing clean |
@@ -273,6 +274,30 @@ Change these from the plugin's settings in Claude Code.
 - **Handoff said it didn't clear.** Type `/clear` yourself and paste: your note is saved in `~/.claude/handoffs/`.
 
 ---
+
+## Privacy, and what this plugin runs
+
+Cockpit is a *mod*: code that runs inside Claude Code on your machine. Everything it does is listed here.
+
+**It does not use the network.** It makes no web requests, has no server, no analytics and no account. It bundles no MCP server and no package to download, and it runs nothing from a package registry (`npx`, `uvx` and the like).
+
+**What it reads**
+- Your session's own numbers, which Claude Code hands to the mod: context use, cache timing, and the 5-hour and weekly limits.
+- The current folder's name, and, when you press Handoff only, read-only `git` commands in that folder (`git rev-parse`, `git branch --show-current`, `git status --porcelain -uno`) so the note can say which repo and branch you were on.
+- The `HOME` environment variable, to find `~/.claude`.
+
+**What it writes (all on your machine)**
+- `~/.claude/status-band-trace.log`: a short debugging log (the last few hundred lines) of what the band and the game keys did: button presses, version, errors. It records no prompt text, no conversation content, and no typed characters other than the game's own keys (Space, ↑, J, K). Delete it any time.
+- `~/.claude/handoffs/<time>.md`: the handoff note, saved only when you press Handoff, as a safety copy before the chat is cleared.
+- A small saved state in Claude Code's own mod store: your game best score, and the current band numbers.
+
+**The one thing that talks to Claude: Handoff.** When you press **⤴ Handoff** and confirm, the mod asks the same Claude session (a fork of it, through Claude Code's own `model.fork`) to write a short summary note, saves the note, runs `/clear`, and pastes the note into the new chat's prompt box for you to review and send. That uses your normal Claude usage. Nothing is sent anywhere else, and Handoff never runs on its own. The band, the mascot and the game make no model call and cost no tokens.
+
+**It does not** read your files other than the two logs above, collect personal data, store credentials, read other environment variables, or send anything to the author or any third party.
+
+**Who it is for:** developers using Claude Code. It is not directed at children.
+
+Questions or problems: open an issue at <https://github.com/SohamShirsat/claude-cockpit/issues>.
 
 ## For developers
 
