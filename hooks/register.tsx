@@ -86,25 +86,14 @@ const toUsage = (
   cost: cost?.usd,
 })
 
-async function run($: Dollar, dir: string, argv: string[], timeoutMs = 4000) {
-  try {
-    return await $.process.run(argv, { cwd: dir, timeoutMs })
-  } catch {
-    return null
-  }
-}
-
-function git($: Dollar, dir: string, args: string[]) {
-  return run($, dir, ['git', ...args])
-}
-
 // the repo the session sits in, read once when a handoff is written
 async function readRepo($: Dollar, dir: string): Promise<Repo | null> {
+  // the four fixed, read-only git commands the handoff note needs (a failure of any one leaves its part out)
   const [top, br, sha, st] = await Promise.all([
-    git($, dir, ['rev-parse', '--path-format=absolute', '--show-toplevel', '--git-dir', '--git-common-dir']),
-    git($, dir, ['branch', '--show-current']),
-    git($, dir, ['rev-parse', '--short', 'HEAD']),
-    git($, dir, ['status', '--porcelain', '-uno']),
+    $.process.run(['git', 'rev-parse', '--path-format=absolute', '--show-toplevel', '--git-dir', '--git-common-dir'], { cwd: dir, timeoutMs: 4000 }).catch(() => null),
+    $.process.run(['git', 'branch', '--show-current'], { cwd: dir, timeoutMs: 4000 }).catch(() => null),
+    $.process.run(['git', 'rev-parse', '--short', 'HEAD'], { cwd: dir, timeoutMs: 4000 }).catch(() => null),
+    $.process.run(['git', 'status', '--porcelain', '-uno'], { cwd: dir, timeoutMs: 4000 }).catch(() => null),
   ])
   if (!top || top.exitCode !== 0) return null
   const [root, gitDir, common] = top.stdout.trim().split('\n')
@@ -818,7 +807,7 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'Pane', requestId: GAME_PANE }, async ($, e) => {
     const els = $.ui.resolve(e)
-    const { Box, Text, Client } = els
+    const { Box, Text, Client } = $.ui.resolve(e)
     // the terminal's element table holds an empty Svg: only the other surfaces draw one
     if (e.surface !== 'terminal' && 'Svg' in els) {
       const run = await read($, runAtom)
@@ -847,7 +836,7 @@ export const register: Register = (on, options) => {
     if (e.props.hasSurvey) return next(e)
 
     const els = $.ui.resolve(e)
-    const { Box, Button, Text, Client } = els
+    const { Box, Button, Text, Client } = $.ui.resolve(e)
     // the terminal's element table holds an empty Svg: only the other surfaces draw one
     const isSvg = e.surface !== 'terminal' && 'Svg' in els
     const [usage, cacheRaw, now, phase, best, gameOpen, run, signal] = await Promise.all([
