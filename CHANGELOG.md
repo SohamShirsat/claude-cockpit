@@ -2,6 +2,14 @@
 
 What changed in each version, newest first. (The plugin's version lives in `.claude-plugin/plugin.json`.)
 
+## 0.13.14
+
+**Passes the Claude directory's checks.**
+- The code now follows the directory's stricter reading rules: no variable named `h`, `git` is a plain function, the terminal game's `Client` comes straight from the element table.
+- Dropped the `ui.fault` hook (a diagnostic toast the directory's event list does not know); a failing game surface is simply left out, as before.
+- A 1024 px icon (`.claude-plugin/icon.png`).
+- README: the privacy section now lists every call the mod makes, the hooks it registers, the exact `git` commands, and what Handoff does step by step.
+
 ## 0.13.13
 
 **Ready for the Claude directory: privacy page, fresh pictures.**

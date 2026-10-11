@@ -1,7 +1,7 @@
 {
   "name": "status-band",
   "displayName": "Claude Cockpit",
-  "version": "0.13.13",
+  "version": "0.13.14",
   "description": "Claude Cockpit: a dashboard above the prompt with context %, cache countdown, 5-hour and weekly limits, one-click Handoff to a fresh chat, and a tokenless bug-fixing crab game while Claude works: the crab changes costume and the world around it as your score climbs.",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -68,5 +68,6 @@
     "usage-limits",
     "handoff",
     "game"
-  ]
+  ],
+  "icon": "./.claude-plugin/icon.png"
 }

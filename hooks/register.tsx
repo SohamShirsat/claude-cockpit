@@ -17,7 +17,7 @@ const runAtom = atom({ plugin: 'status-band', key: 'game' } as const, null)
 // the terminal's game lives in its Client: each press of the prompt's keys bumps this, and the Client acts on a change
 const signalAtom = atom({ plugin: 'status-band', key: 'jumpSignal' } as const, 0)
 
-const VERSION = '0.13.13'
+const VERSION = '0.13.14'
 // rows the game takes: the terminal's is a header, the five rows of the field and the ground;
 // the desktop's the one line of guidance (which is also the click target) and the picture (108 px)
 const GAME_ROWS = { text: 7, svg: 9 } as const
@@ -68,8 +68,8 @@ const clockAt = (iso: string | undefined) => {
   const t = iso ? Date.parse(iso) : NaN
   if (Number.isNaN(t)) return ''
   const d = new Date(t)
-  const h = d.getHours() % 12 || 12
-  return `${h}:${String(d.getMinutes()).padStart(2, '0')}${d.getHours() < 12 ? 'am' : 'pm'}`
+  const hr = d.getHours() % 12 || 12
+  return `${hr}:${String(d.getMinutes()).padStart(2, '0')}${d.getHours() < 12 ? 'am' : 'pm'}`
 }
 
 const level = (pct: number) => (pct >= 85 ? 'error' : pct >= 60 ? 'warning' : 'success')
@@ -94,7 +94,9 @@ async function run($: Dollar, dir: string, argv: string[], timeoutMs = 4000) {
   }
 }
 
-const git = ($: Dollar, dir: string, args: string[]) => run($, dir, ['git', ...args])
+function git($: Dollar, dir: string, args: string[]) {
+  return run($, dir, ['git', ...args])
+}
 
 // the repo the session sits in, read once when a handoff is written
 async function readRepo($: Dollar, dir: string): Promise<Repo | null> {
@@ -719,14 +721,6 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  // a client module that fails on a surface is left out; say why instead of failing silently
-  on('ui.fault', async ($, e, next) => {
-    await trace($, `fault ${e.surface} ${e.module} ${e.phase}: ${e.reason}`)
-    toast($, `status-band: ${e.module} failed on ${e.surface} (${e.phase}): ${e.reason}`)
-
-    return next(e)
-  })
-
   // Space and ↑ play while the game is open and the prompt box is empty, without a click on the game
   // first: the box takes them as edits, so they are read here and not typed. Any other text, and the
   // box behaves as ever. The first few edits while the game is open go to the trace, as a game key or
@@ -824,7 +818,7 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'Pane', requestId: GAME_PANE }, async ($, e) => {
     const els = $.ui.resolve(e)
-    const { Box, Text } = els
+    const { Box, Text, Client } = els
     // the terminal's element table holds an empty Svg: only the other surfaces draw one
     if (e.surface !== 'terminal' && 'Svg' in els) {
       const run = await read($, runAtom)
@@ -832,7 +826,6 @@ export const register: Register = (on, options) => {
 
       return run ? sceneView($, els, run, e.props.bodyColumns) : <Box />
     }
-    const Client = 'Client' in els ? els.Client : null
     if (!Client) {
       return (
         <Box>
@@ -854,8 +847,7 @@ export const register: Register = (on, options) => {
     if (e.props.hasSurvey) return next(e)
 
     const els = $.ui.resolve(e)
-    const { Box, Button, Text } = els
-    const Client = 'Client' in els ? els.Client : null
+    const { Box, Button, Text, Client } = els
     // the terminal's element table holds an empty Svg: only the other surfaces draw one
     const isSvg = e.surface !== 'terminal' && 'Svg' in els
     const [usage, cacheRaw, now, phase, best, gameOpen, run, signal] = await Promise.all([

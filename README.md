@@ -277,23 +277,34 @@ Change these from the plugin's settings in Claude Code.
 
 ## Privacy, and what this plugin runs
 
-Cockpit is a *mod*: code that runs inside Claude Code on your machine. Everything it does is listed here.
+Cockpit is a *mod*: code that runs inside Claude Code on your machine. Everything it does is listed here, call by call.
 
-**It does not use the network.** It makes no web requests, has no server, no analytics and no account. It bundles no MCP server and no package to download, and it runs nothing from a package registry (`npx`, `uvx` and the like).
+**It does not use the network.** It makes no web requests (it never calls `$.http` or `$.mcp`), has no server, no analytics, no telemetry and no account. It bundles no MCP server and no package to download, and runs nothing from a package registry (`npx`, `uvx` and the like). Nothing it reads is sent to the author or any third party.
 
 **What it reads**
-- Your session's own numbers, which Claude Code hands to the mod: context use, cache timing, and the 5-hour and weekly limits.
-- The current folder's name, and, when you press Handoff only, read-only `git` commands in that folder (`git rev-parse`, `git branch --show-current`, `git status --porcelain -uno`) so the note can say which repo and branch you were on.
-- The `HOME` environment variable, to find `~/.claude`.
+- Your session's own numbers, which Claude Code hands to the mod: context use, cache timing, and the 5-hour and weekly limits (`$.session.usage`, the `session.measure` event).
+- The session's working folder (`$.session.cwd`) and its turn count (`$.session.turns`).
+- The `HOME` environment variable (`$.env.get('HOME')`), only to find `~/.claude`. It reads no other environment variable, no credential and no token.
+- Only when you press Handoff: the state of the git repository you are in, with three read-only `git` commands (below).
+
+**What programs it starts.** Only `git`, only on Handoff, only these four fixed commands in the session's working folder, each with a 4-second limit: `git rev-parse --path-format=absolute --show-toplevel --git-dir --git-common-dir`, `git branch --show-current`, `git rev-parse --short HEAD`, and `git status --porcelain -uno`. They change nothing in the repository.
 
 **What it writes (all on your machine)**
-- `~/.claude/status-band-trace.log`: a short debugging log (the last few hundred lines) of what the band and the game keys did: button presses, version, errors. It records no prompt text, no conversation content, and no typed characters other than the game's own keys (Space, ↑, J, K). Delete it any time.
-- `~/.claude/handoffs/<time>.md`: the handoff note, saved only when you press Handoff, as a safety copy before the chat is cleared.
-- A small saved state in Claude Code's own mod store: your game best score, and the current band numbers.
+- `~/.claude/status-band-trace.log`: a short debugging log (the last few hundred lines) of what the band and the game keys did: button presses, version, errors. It records no prompt text, no conversation content, and no typed characters other than the game's own keys (Space, ↑, J, K). It is a plain log: no tool reads or runs it. Delete it any time.
+- `~/.claude/handoffs/<time>.md`: the handoff note, saved only when you press Handoff, as a safety copy before the chat is cleared. It is a plain note; no tool runs it, and the mod never edits a settings, start-up, build or instructions file.
+- A small saved state in Claude Code's own mod store (`$.store`) and session state (`$.state`): your game best score, and the current band numbers.
 
-**The one thing that talks to Claude: Handoff.** When you press **⤴ Handoff** and confirm, the mod asks the same Claude session (a fork of it, through Claude Code's own `model.fork`) to write a short summary note, saves the note, runs `/clear`, and pastes the note into the new chat's prompt box for you to review and send. That uses your normal Claude usage. Nothing is sent anywhere else, and Handoff never runs on its own. The band, the mascot and the game make no model call and cost no tokens.
+**The one thing that talks to Claude: Handoff.** When you press **⤴ Handoff** and confirm, the mod does exactly this, in order:
+1. `$.model.fork`: asks a fork of the same Claude session to write a short summary note (so the fork can read the conversation, through Claude Code's own model call; it uses your normal Claude usage).
+2. Saves the note to `~/.claude/handoffs/` as a safety copy.
+3. `$.command.run`: runs one slash command, **`/clear`**, and nothing else, to start a fresh chat. It runs `/clear` only after the note is saved, and only because you pressed Handoff.
+4. `$.prompt.fill`: puts the note into the new chat's prompt box for you to read and send. It never submits it for you.
 
-**It does not** read your files other than the two logs above, collect personal data, store credentials, read other environment variables, or send anything to the author or any third party.
+The conversation goes nowhere else: no network call exists. Handoff never runs on its own. The band, the mascot and the game make no model call and cost no tokens.
+
+**Hooks it registers.** `session.start`, `session.end`, `session.measure`, `prompt.edit` and `prompt.submit` (to let Space and ↑ play the game while the game is open and the prompt box is empty; any other text passes through unchanged and is never stored), `turn.complete`, `tool.call` (observes only, to know when Claude is working; it never denies, changes or answers a tool call), `ui.render`, `ui.press`, `ui.message` and `ui.close` (the band, the game pane and their buttons).
+
+**It does not** read your files other than the two logs above, collect personal data, store credentials, read any other environment variable, or send anything anywhere.
 
 **Who it is for:** developers using Claude Code. It is not directed at children.
 
