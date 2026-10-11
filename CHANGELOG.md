@@ -2,6 +2,10 @@
 
 What changed in each version, newest first. (The plugin's version lives in `.claude-plugin/plugin.json`.)
 
+## 0.13.15
+
+- The four `git` commands Handoff runs are written out in full in the code (no shared helper), and the terminal game's `Client` is taken straight from the element table, so the directory's scanner can read both.
+
 ## 0.13.14
 
 **Passes the Claude directory's checks.**
