@@ -2,12 +2,12 @@
 //   node --import ./scripts/ts-loader.mjs scripts/preview-scene.ts out.html
 import { writeFileSync } from 'node:fs'
 
-import { act, deskConfig, fresh, lookFor, ROTATION, step } from '../hooks/crab/game'
+import { act, deskConfig, fresh, lookFor, COSTUME_IDS, step } from '../hooks/crab/game'
 import { sceneSvg } from '../hooks/crab/scene'
 
 const cells: string[] = []
-for (const costume of ROTATION.filter((_, n) => n % 2 === 0 || n === 5)) {
-  let g = act(fresh(120, 7, 'ready', { ...lookFor(costume, 0) }, deskConfig), deskConfig)
+for (const costume of COSTUME_IDS.filter((_, n) => n % 2 === 0 || n === 5)) {
+  let g = act(fresh(120, 7, 'ready', { ...lookFor(costume) }, deskConfig), deskConfig)
   const frames: string[] = []
   for (let i = 0; i < 260; i++) {
     g = { ...g, obs: i === 0 ? g.obs : g.obs }

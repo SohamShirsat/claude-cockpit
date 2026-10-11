@@ -2,10 +2,9 @@ import { atom, read, update } from 'claude-code'
 import type { Elements, Hook, Register } from 'claude-code'
 
 import type { Cache, HandoffPhase, Repo, RunView, Usage } from '../types'
-import { act, ahead, deskConfigFor, deskLine, FIELD, fresh, lookFor, step } from './crab/game'
+import { act, ahead, deskConfigFor, deskQuiet, FIELD, fresh, lookFor, step } from './crab/game'
 import type { Config, Game } from './crab/game'
 import { motionSvg, SCENE } from './crab/scene'
-import { keyHint, ringVerdict } from './keys'
 
 type Dollar = Parameters<Hook<'session.start'>>[0]
 
@@ -18,7 +17,7 @@ const runAtom = atom({ plugin: 'status-band', key: 'game' } as const, null)
 // the terminal's game lives in its Client: each press of the prompt's keys bumps this, and the Client acts on a change
 const signalAtom = atom({ plugin: 'status-band', key: 'jumpSignal' } as const, 0)
 
-const VERSION = '0.12.0'
+const VERSION = '0.13.9'
 // rows the game takes: the terminal's is a header, the five rows of the field and the ground;
 // the desktop's the one line of guidance (which is also the click target) and the picture (108 px)
 const GAME_ROWS = { text: 7, svg: 9 } as const
@@ -47,14 +46,6 @@ const REDRAW_MS = 600
 // the first this many presses of an opened game go to the trace, with where each came from
 const PRESS_TRACE = 80
 const GAME_PANE = 'status-band-runner'
-// the desktop's key sink: a native text field that takes every printable key while it has the focus
-const KEYS = 'keys'
-// the band's other pressables: while the ring sits on the key field, a move onto any of these is a key
-const OWN = new Set(['play', 'handoff', 'jump', 'duck', KEYS])
-// asking for the keyboard: a click on Play may not have made the band hold it yet, so ask a few times
-const FOCUS_TRIES_MS = [0, 120, 350, 800, 1600] as const
-// the ring counts as the game's for this long after the last sign of it (a key, or the engine's yes)
-const RING_TTL_MS = 60000
 // a press this soon after a run ends is a key mashed during the crash, not a wish to retry
 const RETRY_GUARD_MS = 450
 const TRACE_LINES = 160
@@ -136,15 +127,9 @@ const S = {
   gameSurface: 'text' as 'text' | 'svg',
   dims: new Set<string>(),
   bandId: '',
-  // do the keys reach the game? wait = asked, no answer yet; live = the engine put the ring on the
-  // key field or a key came through it; click = the engine said no, so the person has to click the line
-  keys: 'wait' as 'wait' | 'live' | 'click',
-  // where the focus ring last sat while the game was open, and when that was last confirmed
-  ring: '',
-  ringAt: 0,
   overAt: 0,
-  focusRun: 0,
-  turnDone: false,
+  // how many runs this session has finished: the keys are spelled out for the first game of a session only
+  runs: 0,
   // the desktop's run: the hooks module owns it and steps it by the wall clock (`advance`); the picture
   // is a plan made from it (`replan`), and the band is told when either changed (`publish`)
   run: null as Game | null,
@@ -406,7 +391,7 @@ function replan(now: number) {
   const size = { width: cfg.width * PX_PER_UNIT, height: SCENE.h * PX_PER_UNIT }
   S.lastPlanAt = now
   if (g.mode !== 'play' || S.classic) {
-    S.svg = motionSvg({ states: [g], phase: 0, overAge: g.mode === 'over' ? Math.max(0, (now - S.overAt) / ms) : undefined }, cfg, size)
+    S.svg = motionSvg({ states: [g], phase: 0, overAge: g.mode === 'over' ? Math.max(0, (now - S.overAt) / ms) : undefined, hints: !deskQuiet(S.runs) }, cfg, size)
     S.planEnd = 0
     S.deathAt = Infinity
 
@@ -416,7 +401,7 @@ function replan(now: number) {
   const whole = Math.floor(owed)
   const run = ahead(g, cfg, whole + PLAN_TICKS)
   const phase = owed - whole
-  S.svg = motionSvg({ states: run.slice(whole), phase }, cfg, size)
+  S.svg = motionSvg({ states: run.slice(whole), phase, hints: !deskQuiet(S.runs) }, cfg, size)
   S.planEnd = now + LEAD_MS + (PLAN_TICKS - phase) * ms
   const end = run.findIndex(r => r.mode === 'over')
   S.deathAt = end < 0 ? Infinity : S.tickAt + end * ms
@@ -446,6 +431,7 @@ function arm($: Dollar, now: number) {
 async function finish($: Dollar, now: number) {
   if (S.isOver) return
   S.isOver = true
+  S.runs += 1
   stopGameTimer()
   replan(now)
   await publish($)
@@ -550,78 +536,9 @@ async function pressKeys($: Dollar, move: 'jump' | 'duck') {
   else await update($, signalAtom, n => (n ?? 0) + 1)
 }
 
-// the game takes the keyboard: the desktop's key field is given the focus ring, so Space and the
-// rest reach it without a click on it first. The keyboard is the person's to give, and a click on
-// Play may not have handed the band its keys by the time we ask, so the ask is repeated a few times;
-// if every one is refused, the line says "click here" and the first click on it does the rest.
-// Every answer goes to the trace.
-async function focusGame($: Dollar) {
-  try {
-    await askForKeys($)
-  } catch {
-    // the session ended or the plugin was reloaded under the asking: nothing is left to ask
-  }
-}
-
-async function askForKeys($: Dollar) {
-  if (S.gameSurface !== 'svg') return
-  const run = ++S.focusRun
-  for (const wait of FOCUS_TRIES_MS) {
-    if (wait > 0) await new Promise<void>(done => void $.clock.after(wait, () => done()))
-    // a newer ask, a closed game, or a key that already came through: nothing left to ask for
-    if (run !== S.focusRun || !(await read($, gameAtom)) || S.keys === 'live') return
-    const id = S.isPaneOpen ? GAME_PANE : S.bandId
-    if (!id) continue
-    try {
-      const r = await $.ui.focus({ requestId: id, key: KEYS })
-      void trace($, `focus ${id} try@${wait} ${r.deny ? `denied: ${r.deny}` : 'ok'}`)
-      if (!r.deny) {
-        S.ring = KEYS
-        S.ringAt = await $.clock.now()
-        setKeys($, 'live')
-
-        return
-      }
-    } catch (err) {
-      void trace($, `focus ${id} try@${wait} failed: ${String(err)}`)
-    }
-  }
-  if (run === S.focusRun && S.keys !== 'live') setKeys($, 'click')
-}
-
-function setKeys($: Dollar, state: 'wait' | 'live' | 'click') {
-  if (S.keys === state) return
-  S.keys = state
-  $.ui.invalidate('ui.render')
-}
-
-// every key the key field takes: q closes the game, j and s duck, anything else jumps. The field keeps
-// what was typed in it until the band draws another value, and says so at every change, so a key is
-// text that did not shrink: a reset to nothing, or a Backspace, is not one.
-async function typedKeys($: Dollar, text: string) {
-  const before = S.field
-  S.field = text
-  if (!text || text.length < before.length) return
-  S.ring = KEYS
-  S.ringAt = await $.clock.now()
-  // a key came through the field, so the keys do reach the game, whatever the engine said
-  setKeys($, 'live')
-  if (S.logged < 30) {
-    S.logged++
-    void trace($, `key via=input ${JSON.stringify(text)}`)
-  }
-  const last = text.toLowerCase().slice(-1)
-  if (last === 'q') await closeGame($)
-  else await press($, last === 'j' || last === 's' ? 'duck' : 'jump', 'field')
-}
-
 async function closeGame($: Dollar) {
   stopGameTimer()
   S.run = null
-  S.focusRun++
-  S.ring = ''
-  S.keys = 'wait'
-  S.turnDone = false
   await update($, gameAtom, () => false)
   await update($, runAtom, () => null)
   if (!S.isPaneOpen) return
@@ -643,12 +560,8 @@ async function toggleGame($: Dollar, isSvg: boolean) {
   S.gameSurface = isSvg ? 'svg' : 'text'
   S.logged = 0
   S.pressed = 0
-  S.field = ''
   S.lastMove = ''
   S.drawnSeq = -1
-  S.keys = 'wait'
-  S.ring = ''
-  S.turnDone = false
   if (S.bandRows < 1 + rows) {
     let isPlaced = false
     try {
@@ -667,15 +580,12 @@ async function toggleGame($: Dollar, isSvg: boolean) {
     // the field is as wide as the band, so the picture fills it
     const units = Math.max(FIELD.min, Math.min(FIELD.max, Math.round(Math.min(SCENE_MAX_WIDTH, S.cols * SCENE_PX_PER_COL) / PX_PER_UNIT)))
     S.cfg = deskConfigFor(units)
-    S.run = fresh(best, 1 + (now % 99991), 'ready', lookFor(S.costume, Math.floor(now / 60000)), S.cfg)
+    S.run = fresh(best, 1 + (now % 99991), 'ready', lookFor(S.costume), S.cfg)
     S.isOver = false
     replan(now)
     await publish($)
   }
   await update($, gameAtom, () => true)
-  // Play was a click in the band: hand the keyboard to the game's key field once it is drawn (the
-  // press itself is not held up by the asking)
-  void focusGame($)
 }
 
 // the band is being drawn with the picture it drew last: the draw was somebody else's (a turn ended,
@@ -713,43 +623,23 @@ async function refresh($: Dollar) {
 
 type VectorEls = Elements['desktop'] | Elements['vscode'] | Elements['mobile']
 
-// the picture of the run with its one line of guidance above: where the surface has a text field,
-// that line is the field itself (it takes the focus ring, every printable key reaches it, Enter
-// plays), with a small jump button beside it for the mouse and for the hotkey. Elsewhere it is plain
-// text with the same button.
+// The picture of the run, and nothing else drawn: no key field, no row of hints (the first game's
+// hint, `J duck · K jump`, is drawn inside the picture under the scoreboard, so the band is the same
+// size in every game). The desktop only hands the keys to the game through a Button's hotkey while the
+// band holds the focus (after a click on Play it does), so the J and K buttons are always in the tree:
+// they ARE the keys (K starts, retries and jumps; J ducks). They are drawn in a Box with no size,
+// clipped, at the picture's corner: nothing shows (a visible hotkey is drawn as a chip) but they stay
+// wholly inside the band, which is where the engine arms a hotkey (one scrolled out of the window is not).
 function sceneView($: Dollar, els: VectorEls, view: RunView, bodyColumns: number) {
-  const { Box, Button, Svg, Text } = els
-  const Input = 'Input' in els ? els.Input : null
+  const { Box, Button, Svg } = els
   const width = Math.max(150, Math.min(SCENE_MAX_WIDTH, Math.floor(bodyColumns * SCENE_PX_PER_COL)))
   const height = Math.round((width * SCENE.h) / view.units)
-  const line = deskLine(view.game, Input ? keyHint(S.keys, S.turnDone) : undefined)
 
   return (
-    <Box key="game" flexDirection="column">
-      <Box columnGap={1}>
-        <Box flexGrow={1}>
-          {Input ? (
-            <Input
-              key={KEYS}
-              label="✻"
-              placeholder={line.trim()}
-              value=""
-              submitLabel="jump"
-              autoFocus
-              onInput={text => void typedKeys($, text)}
-              onSubmit={() => void press($, 'jump', 'enter')}
-            />
-          ) : (
-            <Box>
-              <Text color="claude" bold>
-                ✻
-              </Text>
-              <Text dimColor>{line}</Text>
-            </Box>
-          )}
-        </Box>
-        <Button key="duck" label="▼ duck" hotkey="j" plain dimColor onPress={() => press($, 'duck', 'button')} />
-        <Button key="jump" label="▲ jump" hotkey="k" plain dimColor onPress={() => press($, 'jump', 'button')} />
+    <Box key="game" flexDirection="column" position="relative">
+      <Box key="keys-hidden" position="absolute" top={0} left={0} width={0} height={0} overflow="hidden">
+        <Button key="duck" label="duck" hotkey="j" plain dimColor onPress={() => press($, 'duck', 'button')} />
+        <Button key="jump" label="jump" hotkey="k" plain dimColor onPress={() => press($, 'jump', 'button')} />
       </Box>
       <Svg
         key="scene"
@@ -786,6 +676,7 @@ export const register: Register = (on, options) => {
     } catch {
       // a missing store only means no saved high score
     }
+    S.runs = 0
     startTicking($)
     const u = await $.session.usage()
     await update($, usageAtom, () => toUsage(u.context, u.rateLimits, u.cost))
@@ -832,44 +723,6 @@ export const register: Register = (on, options) => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  // The arrows and Tab move the focus ring instead of typing, and Space on a ring that sits on Play
-  // would close the game. So while the ring is on the game's key field, a person's move of it onto
-  // another of the band's controls is read as a key (it jumps) and the ring stays on the field:
-  // Down lands on the jump button, Up on Play, and neither is ever pressed by accident. A move onto
-  // one of the engine's own stops cannot be redirected, so it passes through and is never a key:
-  // Esc and the way out to the prompt are never in the game's way.
-  on('ui.focus', async ($, e, next) => {
-    if (S.gameSurface !== 'svg' || !(await read($, gameAtom))) return next(e)
-    const now = await $.clock.now()
-    const isOwn = e.plugin !== undefined && e.plugin.startsWith('status-band')
-    const verdict = ringVerdict(
-      { origin: e.origin.kind, isOwn, element: e.element },
-      { ring: S.ring, at: S.ringAt, now },
-      { keys: KEYS, own: OWN, ttlMs: RING_TTL_MS },
-    )
-    if (verdict !== 'pass' && S.logged < 30) {
-      S.logged++
-      void trace($, `ring ${verdict} element=${e.element ?? 'engine'} origin=${e.origin.kind} from=${S.ring || '-'}`)
-    }
-
-    if (verdict === 'jump') {
-      S.ringAt = now
-      // a move onto Play is the click on Play arriving after the game opened, never a key
-      if (e.element !== 'play' || S.run?.mode === 'play') void press($, e.element === 'duck' ? 'duck' : 'jump', `ring:${e.element}`)
-
-      return next({ ...e, element: KEYS })
-    }
-    const moved = await next(e)
-    if (verdict === 'confirm' && !moved.deny) {
-      S.ring = KEYS
-      S.ringAt = now
-    } else if (verdict === 'leave') {
-      S.ring = ''
-    }
-
-    return moved
-  }).catch(($, e, next) => next(e))
-
   // the terminal runner posts its high score when a run ends; both games post a close when the
   // person presses q, and the desktop's guidance line posts each jump
   on('ui.message', async ($, e, next) => {
@@ -908,7 +761,6 @@ export const register: Register = (on, options) => {
   })
 
   on('prompt.submit', async ($, e, next) => {
-    S.turnDone = false
     if (buddy !== 'off') startBuddy($, await $.clock.now())
 
     return next(e)
@@ -916,12 +768,6 @@ export const register: Register = (on, options) => {
 
   on('turn.complete', async ($, e, next) => {
     stopBuddy()
-    // the game outlives the turn and keeps the keys: say how to get them back
-    if (await read($, gameAtom)) {
-      S.turnDone = true
-      $.ui.invalidate('ui.render')
-      toast($, 'Claude finished. Press Esc to type again.')
-    }
     const u = e.usage
     if (u) {
       const total = u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens
@@ -965,7 +811,7 @@ export const register: Register = (on, options) => {
 
     return (
       <Box>
-        <Client key={`runner-${cols}`} module="./runner.tsx" props={{ best, cols, costume: S.costume, start: Math.floor(now / 60000), signal }} width={cols} />
+        <Client key={`runner-${cols}`} module="./runner.tsx" props={{ best, cols, costume: S.costume, signal }} width={cols} />
       </Box>
     )
   })
@@ -1141,7 +987,7 @@ export const register: Register = (on, options) => {
     } else if (isGameHere && Client) {
       game = (
         <Box key="game" marginTop={e.props.maxRows >= 2 + gameRows ? 1 : 0}>
-          <Client key={`runner-${gameCols}`} module="./runner.tsx" props={{ best, cols: gameCols, costume: S.costume, start: Math.floor(now / 60000), signal }} width={gameCols} />
+          <Client key={`runner-${gameCols}`} module="./runner.tsx" props={{ best, cols: gameCols, costume: S.costume, signal }} width={gameCols} />
         </Box>
       )
     }

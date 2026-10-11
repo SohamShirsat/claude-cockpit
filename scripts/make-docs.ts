@@ -3,9 +3,10 @@
 // then screenshot each page (see docs/README.md).
 import { mkdirSync, writeFileSync } from 'node:fs'
 
-import { act, deskConfig, deskLine, fresh, lookFor, ROTATION } from '../hooks/crab/game'
+import { act, deskConfig, deskLine, fresh, lookFor, COSTUME_IDS } from '../hooks/crab/game'
 import type { Game } from '../hooks/crab/game'
 import { crabGroup, sceneSvg } from '../hooks/crab/scene'
+import { STAGES } from '../hooks/crab/stages'
 
 const out = process.argv[2] ?? 'docs-build'
 mkdirSync(out, { recursive: true })
@@ -20,8 +21,9 @@ body{margin:0;background:#fbfaf8;font:14px -apple-system,BlinkMacSystemFont,'Seg
 .band{display:flex;justify-content:space-between;color:#85837d;font-size:15px;margin-bottom:10px}
 .band b{color:#2e7d32;margin-left:4px}.band .d{margin:0 6px}
 .band .r{color:#1f1e1d;display:flex;gap:22px}
-.hd{color:#85837d;font-size:15px;margin:0 0 4px}
-.hd i{color:#c4623f;font-style:normal;font-weight:700;margin-right:2px}
+.keysrow{display:flex;justify-content:space-between;align-items:center;color:#85837d;font-size:15px;margin:0 0 4px}
+.keysrow .f{border:1px solid #d9d7d2;border-radius:7px;padding:2px 10px;min-width:150px;background:#f7f6f4}
+.keysrow .k{display:flex;gap:18px}.keysrow kbd{font:11px ui-monospace,Menlo,monospace;border:1px solid #d9d7d2;border-radius:5px;padding:0 5px;margin-right:6px}
 svg{display:block}
 .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;width:760px;padding:28px;box-sizing:border-box}
 .tile{background:#f0efed;border-radius:14px;padding:12px 8px 10px;text-align:center}
@@ -31,13 +33,13 @@ svg{display:block}
 
 const W = 728
 const H = Math.round((W * 72) / deskConfig.width)
-const base = (g: Partial<Game>): Game => ({ ...act(fresh(377, 7, 'ready', lookFor('plain', 0), deskConfig), deskConfig), ...g })
+const base = (g: Partial<Game>): Game => ({ ...act(fresh(377, 7, 'ready', lookFor('plain'), deskConfig), deskConfig), ...g })
 
-const panel = (g: Game, bandRow: boolean) => `<div class="panel">${
+const panel = (g: Game, bandRow: boolean, quiet = false) => `<div class="panel">${
   bandRow
     ? `<div class="band"><div>ctx<b>8%</b><span class="d">·</span>cache<b>55m</b><span class="d">·</span>5h<b>29%</b><span class="d">·</span>7d<b>46%</b></div><div class="r"><span>■ close</span><span>⤴ Handoff</span></div></div>`
     : ''
-}<p class="hd"><i>✻</i>${deskLine(g, 'any key')}</p>${sceneSvg(g, deskConfig, { width: W, height: H })}</div>`
+}<p class="keysrow"><span class="f">${deskLine(g, 'any key', quiet).trim() || '&nbsp;'}</span><span class="k">${quiet ? '' : '<span><kbd>J</kbd>▼ duck</span><span><kbd>K</kbd>▲ jump</span>'}</span></p>${sceneSvg(g, deskConfig, { width: W, height: H })}</div>`
 
 const bug = (id: number, x: number, kind: Game['obs'][number]['kind'], w: number, h: number, base = 0): Game['obs'][number] => ({ id, x, w, h, base, tall: kind === 'beetle', kind })
 const playing = base({
@@ -58,7 +60,7 @@ const playing = base({
   note: 'moth! duck under it with ↓ or J',
   noteAge: 12,
 })
-const ready = { ...fresh(377, 7, 'ready', lookFor('astronaut', 0), deskConfig) }
+const ready = { ...fresh(377, 7, 'ready', lookFor('astronaut'), deskConfig) }
 const over = base({ mode: 'over', score: 95.2, grabbed: 1, off: 300, obs: [bug(1, 48, 'bug', 12, 9)], clouds: [{ id: 2, x: 190, w: 16, h: 40 }] })
 
 writeFileSync(
@@ -66,15 +68,15 @@ writeFileSync(
   `<!doctype html><meta charset=utf-8><style>${CSS}</style><body><div class="wrap">
 <div class="cap">Playing: jump, fix or duck the bugs</div>${panel(playing, true)}
 <div class="cap">Waiting to start</div>${panel(ready, false)}
-<div class="cap">Game over</div>${panel(over, false)}</div>
+<div class="cap">Game over (and every run, once you know the keys: the line and the J / K labels go quiet)</div>${panel(over, false, true)}</div>
 <script>addEventListener('load',()=>document.querySelectorAll('svg').forEach(s=>{if(s.pauseAnimations){s.pauseAnimations();s.setCurrentTime(0.02)}}))</script>`,
 )
 
 const TIER: Record<string, string> = {
-  plain: 'the walk', astronaut: 'floats, antenna blinks', detective: 'magnifier sweeps', engineer: 'turns a bolt',
+  plain: 'the walk', swimmer: 'the snorkel sways', astronaut: 'floats, antenna blinks', detective: 'magnifier sweeps', engineer: 'turns a bolt',
   chef: 'tosses the omelette', racer: 'runs at double pace', pirate: 'fences with a cutlass',
 }
-const tiles = ROTATION.map(
+const tiles = COSTUME_IDS.map(
   c => `<div class="tile"><svg viewBox="0 0 30 28" width="150" height="140" shape-rendering="crispEdges">${crabGroup(c, 0, false, false)}</svg><b>${c}</b><small>${TIER[c]}</small></div>`,
 ).join('')
 writeFileSync(`${out}/costumes.html`, `<!doctype html><meta charset=utf-8><style>${CSS}</style><body><div class="grid">${tiles}</div>`)
@@ -123,6 +125,7 @@ const guide = [
   guideTile('Moth', 'flies high: duck (↓ or J)', one([bug(1, 88, 'moth', 14, 9, 11)])),
   guideTile('Twin bugs', 'one long jump', one([bug(1, 82, 'twin', 27, 9)])),
   guideTile('Segfault pit', 'a gap: jump it', one([bug(1, 80, 'pit', 34, 0)])),
+  guideTile('Tall stack', 'jump high, or land on top', one([bug(1, 88, 'tower', 12, 24)])),
   guideTile('Cloud', 'grab it: +25', one([], [{ id: 2, x: 92, w: 16, h: 22 }])),
   guideTile('Green ✓ orb', 'a shield: takes one hit', one([], [{ id: 3, x: 96, w: 10, h: 22, t: 10, shield: true }])),
 ]
@@ -130,4 +133,23 @@ writeFileSync(
   `${out}/guide.html`,
   `<!doctype html><meta charset=utf-8><style>${CSS}.grid{grid-template-columns:repeat(4,1fr);width:960px}.tile{padding:10px 8px}.tile small{font-size:12.5px}</style><body><div class="grid">${guide.join('')}</div>`,
 )
-console.log(`wrote ${out}/preview.html, costumes.html, band.html and guide.html`)
+
+// ---- the journey: one tile a world, in the order the score climbs through them ----
+const world = (i: number): string => {
+  const stage = STAGES[i]
+  const g = base({
+    mode: 'play', costume: stage?.costume ?? 'plain', stage: i, stageAge: i > 0 ? 30 : -1, tick: 40 + i * 7, off: 400 + i * 123, score: (stage?.at ?? 0) + 20, y: 0, jump: -1,
+    grabbed: 2, fixed: 4, note: '', noteAge: -1,
+    obs: [bug(1, 150, 'bug', 12, 9), bug(2, 250, i % 2 ? 'tower' : 'beetle', 12, i % 2 ? 24 : 13)],
+    clouds: [{ id: 3, x: 190, w: 16, h: 42 }],
+  })
+  const w = 372
+
+  return `<div class="tile" style="text-align:left"><div style="font-size:12px;letter-spacing:.06em;color:#85837d;margin:0 2px 6px">${i + 1} · score ${stage?.at ?? 0}+ · ${stage?.name ?? ''}</div>${sceneSvg(g, deskConfig, { width: w, height: Math.round((w * 72) / deskConfig.width) })}</div>`
+}
+writeFileSync(
+  `${out}/journey.html`,
+  `<!doctype html><meta charset=utf-8><style>${CSS}.grid{grid-template-columns:repeat(2,1fr);width:840px}.tile{padding:10px}svg{border-radius:8px;overflow:hidden}</style><body><div class="grid">${STAGES.map((_, i) => world(i)).join('')}</div>
+<script>addEventListener('load',()=>document.querySelectorAll('svg').forEach(s=>{if(s.pauseAnimations){s.pauseAnimations();s.setCurrentTime(0.4)}}))</script>`,
+)
+console.log(`wrote ${out}/preview.html, costumes.html, band.html, guide.html and journey.html`)

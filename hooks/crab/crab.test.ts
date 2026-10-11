@@ -1,15 +1,15 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import { COSTUMES, GRID, layers, paintOrder, toSvg } from './master'
-import { act, ahead, deskConfig, deskConfigFor, fresh, header, lookFor, NOTE_TICKS, POP_LIFE, ROTATION, step, termConfig } from './game'
+import { act, ahead, deskConfig, deskConfigFor, fresh, header, lookFor, NOTE_TICKS, POP_LIFE, COSTUME_IDS, step, termConfig } from './game'
 import type { Config, Game, Kind } from './game'
 import { pilot } from './pilot'
 import { ARC, HIT, MINI_W, miniFrame, miniHeight, toCells, toRuns } from './mini'
 import { motionSvg, sceneSvg, SCENE, topOf } from './scene'
 
 describe('master sprites', () => {
-  test('seven costumes, each with a body and both leg pairs, all inside the grid', () => {
-    expect(COSTUMES.map(c => c.id)).toEqual(['plain', 'astronaut', 'detective', 'engineer', 'chef', 'racer', 'pirate'])
+  test('eight costumes, each with a body and both leg pairs, all inside the grid', () => {
+    expect(COSTUMES.map(c => c.id)).toEqual(['plain', 'swimmer', 'astronaut', 'detective', 'engineer', 'chef', 'racer', 'pirate'])
     for (const c of COSTUMES) {
       const l = layers(c.id)
       expect(l.bd?.length).toBeGreaterThan(0)
@@ -34,6 +34,7 @@ describe('master sprites', () => {
     expect(props('detective')).toEqual(expect.arrayContaining(['it', 'gl']))
     expect(props('chef')).toEqual(expect.arrayContaining(['pan', 'egg']))
     expect(props('racer')).toEqual(['flag'])
+    expect(props('swimmer')).toEqual(['it'])
   })
 
   test('the svg is standalone, and animated only when asked', () => {
@@ -113,7 +114,7 @@ const play = (cfg: Config, ticks: number, look: Parameters<typeof fresh>[3], ski
 describe('game rules', () => {
   for (const [name, cfg] of [['terminal', termConfig(56)], ['desktop', deskConfig]] as const) {
     test(`${name}: standing still ends the run, and the first bug does it`, () => {
-      const g = play(cfg, 400, lookFor('plain', 0), false)
+      const g = play(cfg, 400, lookFor('plain'), false)
       expect(g.mode).toBe('over')
       expect(g.best).toBeGreaterThan(0)
       expect(g.score).toBeLessThan(150)
@@ -121,7 +122,7 @@ describe('game rules', () => {
 
     test(`${name}: every obstacle can be got past, at every speed it reaches`, () => {
       // a long run of well-timed moves never dies: the arc clears the tallest bug with room to spare
-      const g = play(cfg, 6000, lookFor('plain', 0))
+      const g = play(cfg, 6000, lookFor('plain'))
       expect(g.mode).toBe('play')
       expect(g.tick).toBeGreaterThanOrEqual(6000)
       expect(g.score).toBeGreaterThanOrEqual(6000 * cfg.perTick)
@@ -129,7 +130,7 @@ describe('game rules', () => {
     })
 
     test(`${name}: bugs start off the field's right edge and are dropped once they pass`, () => {
-      let g = act(fresh(0, 5, 'ready', lookFor('plain', 0), cfg), cfg)
+      let g = act(fresh(0, 5, 'ready', lookFor('plain'), cfg), cfg)
       const seen = new Set<number>()
       for (let i = 0; i < 400 && g.mode === 'play'; i++) {
         g = step(g, cfg)
@@ -144,35 +145,36 @@ describe('game rules', () => {
     })
   }
 
-  test('a new costume comes with every retry, and a named one stays', () => {
-    const auto = lookFor('auto', 0)
+  test('every run starts the journey again from the first costume, and a named one stays', () => {
+    const auto = lookFor('auto')
     let g = act(fresh(0, 3, 'ready', auto, deskConfig), deskConfig)
-    expect(g.costume).toBe(ROTATION[0])
-    g = { ...g, mode: 'over' }
-    g = act(g, deskConfig)
-    expect(g.costume).toBe(ROTATION[1])
-    const chef = lookFor('chef', 4)
+    expect(g.costume).toBe('plain')
+    g = act({ ...g, mode: 'over', costume: 'pirate', stage: 6 }, deskConfig)
+    expect(g.mode).toBe('play')
+    expect(g.costume).toBe('plain')
+    expect(g.stage).toBe(0)
+    const chef = lookFor('chef')
     let c = act(fresh(0, 3, 'ready', chef, deskConfig), deskConfig)
     c = act({ ...c, mode: 'over' }, deskConfig)
     expect(c.costume).toBe('chef')
   })
 
   test('the best score is kept when a run ends', () => {
-    const g = play(deskConfig, 300, lookFor('plain', 0), false)
+    const g = play(deskConfig, 300, lookFor('plain'), false)
     expect(g.best).toBe(g.mode === 'over' ? g.best : 0)
     expect(g.best).toBeGreaterThanOrEqual(0)
   })
 })
 
-const KINDS: Kind[] = ['bug', 'beetle', 'moth', 'twin', 'pit']
+const KINDS: Kind[] = ['bug', 'beetle', 'moth', 'twin', 'pit', 'tower']
 const SIZE = { width: 840, height: 144 }
 
 /** A run `g` as it goes with no key pressed: the state `n` steps on. */
 const idle = (g: Game, cfg: Config, n: number): Game => ahead(g, cfg, n).at(-1) ?? g
 
 describe('desktop scene', () => {
-  const crowd = (costume: (typeof ROTATION)[number]): Game => ({
-    ...fresh(0, 3, 'play', lookFor(costume, 0), deskConfig),
+  const crowd = (costume: (typeof COSTUME_IDS)[number]): Game => ({
+    ...fresh(0, 3, 'play', lookFor(costume), deskConfig),
     tick: 5,
     obs: [
       { id: 1, x: 200, w: 12, h: 13, base: 0, tall: true, kind: 'beetle' },
@@ -193,7 +195,7 @@ describe('desktop scene', () => {
   })
 
   test('every costume draws a standalone svg on the ground, in the scene box, with everything that can come', () => {
-    for (const costume of ROTATION) {
+    for (const costume of COSTUME_IDS) {
       const svg = sceneSvg(crowd(costume), deskConfig, SIZE)
       expect(svg.startsWith('<svg')).toBe(true)
       expect(svg).toContain(`viewBox="0 0 ${deskConfig.width} ${SCENE.h}"`)
@@ -215,17 +217,17 @@ describe('desktop scene', () => {
   })
 
   test('the crab leaves the ground while it jumps and never leaves the scene', () => {
-    const base = fresh(0, 3, 'play', lookFor('chef', 0), deskConfig)
+    const base = fresh(0, 3, 'play', lookFor('chef'), deskConfig)
     const ty = (y: number) => Number(/translate\(36 (-?[\d.]+)\)/.exec(sceneSvg({ ...base, y }, deskConfig, SIZE))?.[1])
     expect(ty(0)).toBe(SCENE.ground - SCENE.feet)
     expect(ty(20)).toBe(SCENE.ground - SCENE.feet - 20)
     // the highest hat at the top of the jump is still inside the scene
     const top = Math.max(...deskConfig.arc)
-    for (const c of ROTATION) expect(SCENE.ground - SCENE.feet - top + topOf(c)).toBeGreaterThanOrEqual(0)
+    for (const c of COSTUME_IDS) expect(SCENE.ground - SCENE.feet - top + topOf(c)).toBeGreaterThanOrEqual(0)
   })
 
   test('a lost run is drawn belly up and grey; a pit takes the crab down instead', () => {
-    const g = fresh(0, 3, 'over', lookFor('plain', 0), deskConfig)
+    const g = fresh(0, 3, 'over', lookFor('plain'), deskConfig)
     expect(sceneSvg(g, deskConfig, SIZE)).toContain('values="0 15 18;180 15 18"')
     expect(sceneSvg({ ...g, mode: 'play' }, deskConfig, SIZE)).not.toContain('180 15 18')
     expect(sceneSvg(g, deskConfig, SIZE)).toContain('opacity=".6"')
@@ -235,7 +237,7 @@ describe('desktop scene', () => {
   })
 
   test('a still has nothing to run but the things that loop; a plan animates what moves', () => {
-    const g = fresh(0, 3, 'play', lookFor('plain', 0), deskConfig)
+    const g = fresh(0, 3, 'play', lookFor('plain'), deskConfig)
     const still = sceneSvg(g, deskConfig, SIZE)
     expect(still).not.toContain('fill="freeze"')
     expect(still).not.toContain('translate(0 0 0)')
@@ -247,7 +249,7 @@ describe('desktop scene', () => {
   })
 
   test('the scoreboard is drawn into the picture and counts inside it', () => {
-    let g = act(fresh(377, 5, 'ready', lookFor('plain', 0), deskConfig), deskConfig)
+    let g = act(fresh(377, 5, 'ready', lookFor('plain'), deskConfig), deskConfig)
     for (let i = 0; i < 30; i++) g = step(pilot(g, deskConfig), deskConfig)
     const still = sceneSvg(g, deskConfig, SIZE)
     expect(still).toContain('HI 0377')
@@ -261,7 +263,7 @@ describe('desktop scene', () => {
   })
 
   test('a plan is exact: the run it shows is the run the rules play', () => {
-    let g = act(fresh(0, 41, 'ready', lookFor('plain', 0), deskConfig), deskConfig)
+    let g = act(fresh(0, 41, 'ready', lookFor('plain'), deskConfig), deskConfig)
     for (let i = 0; i < 90; i++) g = step(pilot(g, deskConfig), deskConfig)
     const states = ahead(g, deskConfig, 60)
     let live = g
@@ -277,7 +279,7 @@ describe('desktop scene', () => {
   })
 
   test('a plan of the longest stretch at top speed stays well inside what the surface takes', () => {
-    let g = act(fresh(0, 9, 'ready', lookFor('astronaut', 0), deskConfig), deskConfig)
+    let g = act(fresh(0, 9, 'ready', lookFor('astronaut'), deskConfig), deskConfig)
     g = { ...g, score: 3000 }
     for (let i = 0; i < 200; i++) g = step(pilot(g, deskConfig), deskConfig)
     const svg = motionSvg({ states: ahead(g, deskConfig, 192), phase: 0.7 }, deskConfig, SIZE)
@@ -285,7 +287,7 @@ describe('desktop scene', () => {
   })
 
   test('every animation is well formed: lists agree with their times, begins are not after the start', () => {
-    let g = act(fresh(0, 5, 'ready', lookFor('racer', 0), deskConfig), deskConfig)
+    let g = act(fresh(0, 5, 'ready', lookFor('racer'), deskConfig), deskConfig)
     for (let i = 0; i < 400; i++) g = step(pilot(g, deskConfig), deskConfig)
     const svg = motionSvg({ states: ahead(g, deskConfig, 192), phase: 0.25 }, deskConfig, SIZE)
     for (const tag of svg.match(/<animate(Transform)?[^>]*>/g) ?? []) {
@@ -303,13 +305,13 @@ describe('desktop scene', () => {
       const cfg = deskConfigFor(width)
       expect(cfg.width).toBe(width)
       const crossing = (cfg.width - cfg.crabX) / cfg.speed(0) / 25
-      expect(crossing).toBeGreaterThan(2)
+      expect(crossing).toBeGreaterThan(1.5)
     }
   })
 })
 
 describe('what comes at the crab', () => {
-  const live = (cfg: Config = deskConfig): Game => act(fresh(0, 9, 'ready', lookFor('plain', 0), cfg), cfg)
+  const live = (cfg: Config = deskConfig): Game => act(fresh(0, 9, 'ready', lookFor('plain'), cfg), cfg)
   const bug = (over: Partial<Game['obs'][number]> = {}): Game['obs'][number] => ({ id: 90, x: 50, w: 12, h: 9, base: 0, tall: false, kind: 'bug', ...over })
 
   test('a bug at the crab ends the run; standing under a moth too, but a crab that ducks goes under it', () => {
@@ -405,7 +407,7 @@ describe('what comes at the crab', () => {
     const cfg = deskConfig
     const first: Partial<Record<Kind, number>> = {}
     for (const seed of [3, 11, 77, 123, 321]) {
-      let g = act(fresh(0, seed, 'ready', lookFor('plain', 0), cfg), cfg)
+      let g = act(fresh(0, seed, 'ready', lookFor('plain'), cfg), cfg)
       for (let i = 0; i < 6000 && g.mode === 'play'; i++) {
         g = step(pilot(g, cfg), cfg)
         for (const o of g.obs) if (o.x > cfg.width - 8) first[o.kind] = Math.min(first[o.kind] ?? Infinity, g.score)
@@ -420,7 +422,7 @@ describe('what comes at the crab', () => {
 
   test('the first of each kind is announced, once, and the words fade', () => {
     const cfg = deskConfig
-    let g = act(fresh(0, 7, 'ready', lookFor('plain', 0), cfg), cfg)
+    let g = act(fresh(0, 7, 'ready', lookFor('plain'), cfg), cfg)
     const said: string[] = []
     let last = ''
     for (let i = 0; i < 6000 && g.mode === 'play'; i++) {
@@ -433,10 +435,10 @@ describe('what comes at the crab', () => {
     expect(said.filter(n => /segfault/.test(n))).toHaveLength(1)
     expect(said.filter(n => /shield/.test(n))).toHaveLength(1)
     // the words are gone a few seconds after
-    expect(idle({ ...g, note: 'x', noteAge: 0 }, cfg, NOTE_TICKS + 2).note).toBe('')
+    expect(idle({ ...g, obs: [], note: 'x', noteAge: 0 }, cfg, NOTE_TICKS + 2).note).toBe('')
     // the terminal says nothing
     const t = termConfig(56)
-    let tg = act(fresh(0, 7, 'ready', lookFor('plain', 0), t), t)
+    let tg = act(fresh(0, 7, 'ready', lookFor('plain'), t), t)
     for (let i = 0; i < 300 && tg.mode === 'play'; i++) tg = step(tg, t)
     expect(tg.note).toBe('')
   })
@@ -444,7 +446,7 @@ describe('what comes at the crab', () => {
   test('a pilot that lands on bugs instead of clearing them survives, and earns far more', () => {
     const cfg = deskConfig
     const run = (stomp: boolean) => {
-      let g = act(fresh(0, 3, 'ready', lookFor('plain', 0), cfg), cfg)
+      let g = act(fresh(0, 3, 'ready', lookFor('plain'), cfg), cfg)
       for (let i = 0; i < 3000 && g.mode === 'play'; i++) g = step(pilot(g, cfg, { stomp }), cfg)
 
       return g
@@ -468,7 +470,7 @@ describe('what comes at the crab', () => {
 })
 
 describe('clouds and bugs', () => {
-  const live = (cfg: Config) => act(fresh(0, 9, 'ready', lookFor('plain', 0), cfg), cfg)
+  const live = (cfg: Config) => act(fresh(0, 9, 'ready', lookFor('plain'), cfg), cfg)
 
   for (const [name, cfg] of [['terminal', termConfig(56)], ['desktop', deskConfig]] as const) {
     test(`${name}: reaching a cloud in a jump grabs it, scores it, and sparkles; the ground cannot`, () => {
@@ -525,9 +527,11 @@ describe('clouds and bugs', () => {
 
   test('the desktop runs faster than before, in small steps, and quickens smoothly', () => {
     expect(deskConfig.tickMs).toBeLessThanOrEqual(40)
-    // units a second: it was 75 at the start and 140 at the top (in a field a fifth narrower)
-    expect((deskConfig.speed(0) * 1000) / deskConfig.tickMs).toBeGreaterThanOrEqual(90)
-    expect(deskConfig.speed(Number.MAX_SAFE_INTEGER)).toBeLessThanOrEqual(7.5)
+    // units a second: it was 100 at the start and 185 at the top; now it starts at 125 and tops out at 215
+    expect((deskConfig.speed(0) * 1000) / deskConfig.tickMs).toBeGreaterThanOrEqual(120)
+    expect(deskConfig.speed(Number.MAX_SAFE_INTEGER)).toBeLessThanOrEqual(8.7)
+    // and it gets there by a score of about 800, not 1400
+    expect(deskConfig.speed(800)).toBeGreaterThanOrEqual(deskConfig.speed(Number.MAX_SAFE_INTEGER) - 0.1)
     let last = deskConfig.speed(0)
     for (let score = 0; score < 3000; score += 10) {
       const v = deskConfig.speed(score)
@@ -541,7 +545,7 @@ describe('clouds and bugs', () => {
   })
 
   test('the one line of guidance carries the score, the clouds grabbed, and the keys', () => {
-    const g = fresh(377, 3, 'play', lookFor('plain', 0), deskConfig)
+    const g = fresh(377, 3, 'play', lookFor('plain'), deskConfig)
     expect(header({ ...g, score: 95.6, grabbed: 2 })).toBe(' score 0095 · ☁ 2 · best 0377 · space / ↑ to jump')
     expect(header({ ...g, score: 95.6, grabbed: 2, fixed: 5 })).toBe(' score 0095 · ☁ 2 · ✓ 5 · best 0377 · space / ↑ to jump')
     expect(header({ ...g, mode: 'over', score: 95.6, grabbed: 2 })).toBe(' game over 0095 · ☁ 2 · best 0377 · space / ↑ to retry')

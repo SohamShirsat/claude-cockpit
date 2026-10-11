@@ -1,6 +1,7 @@
 import type { ClientModule } from 'claude-code'
 
-import { act, fresh, header, lookFor, step, termConfig } from './crab/game'
+import { AMBIENT, GROUND } from './crab/ambient'
+import { act, fresh, lookFor, step, termConfig, termHeader } from './crab/game'
 import type { Config, Game } from './crab/game'
 import { miniFrame, toCells, toRuns } from './crab/mini'
 import type { Frame, Px } from './crab/mini'
@@ -10,7 +11,7 @@ import type { Frame, Px } from './crab/mini'
 // frame timer only redraws while a run is live. (The desktop draws a vector scene instead: its
 // proportional font cannot lay block characters out as pixels. See hooks/crab/scene.ts.)
 
-type Props = { best?: number; cols?: number; costume?: string; start?: number; signal?: number } | null
+type Props = { best?: number; cols?: number; costume?: string; signal?: number } | null
 type St = { game: Game; cfg: Config; signal: number }
 
 const FIELD_PX = 10 // the tallest crab (7 pixels) plus the top of a jump (3)
@@ -23,6 +24,13 @@ const CLOUD = '#9CCBF2'
 // The field as pixels, top row first: the clouds, the bugs, then the crab on top of them.
 const field = ({ game: g, cfg }: St): Frame => {
   const px: Frame = Array.from({ length: FIELD_PX }, () => Array<Px>(cfg.width).fill(null))
+  // the world's weather or stars, dim and behind everything
+  const air = AMBIENT[g.costume]
+  if (air && g.mode === 'play') {
+    px.forEach((row, r) => {
+      for (let c = 0; c < cfg.width; c++) if (air.on(c, r, g.tick)) row[c] = air.color
+    })
+  }
   for (const o of g.clouds) {
     for (let c = Math.max(0, Math.floor(o.x)); c < Math.min(cfg.width, Math.floor(o.x) + o.w); c++) {
       for (let k = o.h; k < o.h + cfg.cloud.th; k++) {
@@ -56,6 +64,8 @@ const field = ({ game: g, cfg }: St): Frame => {
 const ground = ({ game: g, cfg }: St): string =>
   Array.from({ length: cfg.width }, (_, c) => ((c + Math.floor(g.off)) % 8 === 0 ? '┄' : '─')).join('')
 
+const groundColor = ({ game: g }: St): string | undefined => GROUND[g.costume]
+
 const pad = (t: string, n: number) => (t.length >= n ? t.slice(0, n) : t + ' '.repeat(n - t.length))
 
 const Runner: ClientModule<Props, St> = (props, surface) => {
@@ -84,7 +94,7 @@ const Runner: ClientModule<Props, St> = (props, surface) => {
       if (ev.type === 'down') press()
     })
     const best = Math.max(0, Math.floor(props?.best ?? 0))
-    surface.setState({ cfg, signal: props?.signal ?? 0, game: fresh(best, 7, 'ready', lookFor(props?.costume, props?.start ?? 0), cfg) })
+    surface.setState({ cfg, signal: props?.signal ?? 0, game: fresh(best, 7, 'ready', lookFor(props?.costume), cfg) })
   }
 
   const s = surface.state
@@ -104,7 +114,7 @@ const Runner: ClientModule<Props, St> = (props, surface) => {
         <Text color="claude" bold>
           ✻
         </Text>
-        <Text dimColor>{pad(header(s.game), s.cfg.width - 1)}</Text>
+        <Text dimColor>{pad(termHeader(s.game), s.cfg.width - 1)}</Text>
       </Box>
       {rows.map((cells, r) => (
         <Box key={`r${r}`}>
@@ -115,7 +125,9 @@ const Runner: ClientModule<Props, St> = (props, surface) => {
           ))}
         </Box>
       ))}
-      <Text dimColor>{ground(s)}</Text>
+      <Text color={groundColor(s)} dimColor={groundColor(s) === undefined}>
+        {ground(s)}
+      </Text>
     </Box>
   )
 }

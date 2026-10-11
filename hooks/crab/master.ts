@@ -29,6 +29,7 @@ export const INK = '#1F1E1D'
 
 export const COSTUMES: readonly Costume[] = [
   { id: 'plain', tier: 'other', accent: '#888780', note: 'no costume' },
+  { id: 'swimmer', tier: 'swim', accent: '#1CA7C9', note: 'swim cap, goggles and a ring; the snorkel sways' },
   { id: 'astronaut', tier: 'fable', accent: '#7F77DD', note: 'glass dome; floats, antenna and star blink' },
   { id: 'detective', tier: 'heavy', accent: '#D85A30', note: 'deerstalker; the magnifier sweeps and glints' },
   { id: 'engineer', tier: 'careful', accent: '#BA7517', note: 'hard hat; the wrench turns a bolt' },
@@ -57,6 +58,19 @@ const crabBody = (f: Fill, armFront = 0, armCls?: string): void => {
 
 const DRAW: Record<CostumeId, (f: Fill, t: string) => void> = {
   plain: f => crabBody(f),
+  swimmer: (f, t) => {
+    crabBody(f)
+    stamp(f, 6, 6, ['.....cccccccc.....', '...cccccccccccc...', '..ccchhcccccccccc.', '.cccccccccccccccc.'], { c: t, h: '#8FDCEF' })
+    // goggles: a dark rim round each eye and a strap between; the eyes show through a pale lens
+    for (const x of [8, 18]) {
+      f(x, 11, 4, 1, '#23576B'); f(x, 14, 4, 1, '#23576B'); f(x, 12, 1, 2, '#23576B'); f(x + 3, 12, 1, 2, '#23576B')
+      f(x + 1, 12, 2, 2, 'rgba(160,220,245,.35)')
+    }
+    f(12, 12, 6, 1, '#23576B'); f(7, 12, 1, 1, '#23576B'); f(22, 12, 1, 1, '#23576B')
+    // the swim ring round the belly, in stripes
+    stamp(f, 5, 17, ['.rrwwrrwwrrwwrrwwrr.', 'rrwwrrwwrrwwrrwwrrww', 'rwwrrwwrrwwrrwwrrwwr', '.wrrwwrrwwrrwwrrww.'], { r: '#E5484D', w: '#F8F6F1' })
+    f(24, 5, 2, 6, '#F5C542', 'it'); f(23, 4, 4, 1, '#F5C542', 'it'); f(24, 11, 2, 1, '#C99A1E', 'it')
+  },
   astronaut: (f, t) => {
     crabBody(f)
     f(6, 7, 18, 1, '#E6E8EE'); f(5, 8, 1, 14, '#E6E8EE'); f(24, 8, 1, 14, '#E6E8EE'); f(6, 22, 18, 1, '#C9CCD2')
@@ -141,6 +155,8 @@ export const CSS = `.run .la{animation:st .5s steps(1) infinite}.run .lb{animati
 @keyframes wave{50%{transform:skewY(-12deg) scaleX(.85)}}
 .c-explore.run .it{transform-origin:50% 100%;animation:fence .5s ease-in-out infinite}
 @keyframes fence{50%{transform:rotate(25deg)}}
+.c-swim.run .it{transform-origin:50% 100%;animation:snork 1s ease-in-out infinite}
+@keyframes snork{50%{transform:rotate(8deg)}}
 @media (prefers-reduced-motion: reduce){.run,.run g{animation:none!important}}`
 
 const rect = ([x, y, w, h, c]: Rect) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${c}"/>`

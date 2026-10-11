@@ -144,7 +144,7 @@ Some of Claude's jobs take minutes. Instead of staring at a spinner, press **▶
 
 ![The game: playing, waiting to start, and game over](docs/game.png)
 
-*(The top picture is mid-run: the crab inside a green shield, a moth to duck, a cloud collected, a pit coming up. The numbers in the corners are the clouds collected, bugs fixed, your score and your best score.)*
+*(The top picture is mid-run: the crab inside a green shield, a moth to duck, a cloud collected, a pit coming up. The numbers in the top right corner are the clouds collected, bugs fixed, your score and your best score; the top left stays clear so the crab's whole jump is in view. `GAME OVER` appears in the picture itself. The small field above the picture is where the keys land. For your first few runs it says what a key does and the buttons beside it name J (duck) and K (jump); after that it is empty and the labels go away, so nothing is left to read but the game.)*
 
 It runs entirely on your computer: **no tokens, no cost, no slowdown for Claude.** Closing it takes one click.
 
@@ -154,10 +154,10 @@ Run to the right. Things come at you. Do one of three things: **jump over it**, 
 
 | to… | press |
 | --- | --- |
-| **Jump** | **Space**, **↑**, **K**, **Enter**, or just **any key**; or click **▲ jump** |
-| **Duck** | **↓**, **J** or **S**; or click **▼ duck**. In mid-air, the same key makes you **dive** down twice as fast |
-| **Start or retry** | any key |
-| **Close** | **Q**, or click **■ close** in the band |
+| **Jump** | **K**, **Space** or **↑**; or click **▲ jump** in the first game |
+| **Duck** | **J** or **↓**; or click **▼ duck** in the first game. In mid-air, the same key makes you **dive** down twice as fast |
+| **Start or retry** | **K** (or **Space** / **↑** from the prompt box) |
+| **Close** | click **■ close** in the band |
 | **Go back to typing** | **Esc** (your prompt is never hijacked: the keys only go to the game while the game has focus) |
 
 ### What comes at you
@@ -167,26 +167,44 @@ Run to the right. Things come at you. Do one of three things: **jump over it**, 
 | thing | what to do | appears from |
 | --- | --- | --- |
 | **Ladybug** | Jump it, or **land on it** to fix it: +10 | the start |
-| **Big beetle** | Jump it, or land on it for **double** | score 60 |
-| **Moth** | It flies at chest height. **Duck** under it (or jump right over) | score 110 |
-| **Twin bugs** | Two in a row: one long jump (landing on them fixes both) | score 180 |
-| **Segfault pit** | A gap in the ground: jump it, or you fall in | score 260 |
+| **Big beetle** | Jump it, or land on it for **double** | score 40 |
+| **Moth** | It flies at chest height. **Duck** under it (or jump right over) | score 70 |
+| **Twin bugs** | Two in a row: one long jump (landing on them fixes both) | score 120 |
+| **Segfault pit** | A gap in the ground: jump it, or you fall in | score 180 |
+| **Tall stack** | "Stack overflow": too tall for a lazy jump. Clear it near the top of your arc, or land on top | score 300 |
 | **Blue cloud** | Reach it mid-jump: +25 and a sparkle | always |
 | **Green ✓ orb** | "Tests passing!" Grab it for a **shield** that blocks one hit | rare |
 
 **Chains:** land on bugs one after another *without touching the ground in between* and the points climb: +10, +20, +30…
 
-The first time each new kind of thing appears, a note at the top says what to do ("moth! duck under it with ↓ or J"), so you don't have to learn anything in advance. The game speeds up smoothly the longer you survive. Your best score is remembered between sessions.
+**Gauntlets:** from about score 60 things sometimes come as a set piece (a bug and a beetle, a moth then a bug, a pit with a bug waiting on the far side, three bugs in a row). Each has more than one way through (one long jump, or a stomp chain), and each is checked by the tests to leave room for a human to do it at every speed.
 
-### Seven costumes
+The first time each new kind of thing appears, a note in the top row says what to do ("moth! duck under it with ↓ or J"), so you don't have to learn anything in advance. The game starts brisk and speeds up smoothly, reaching full speed by a score of about 800. Your best score is remembered between sessions.
 
-The crab wears a different outfit each run (or pick one in settings). Each one has its own little animation.
+### The journey: eight costumes, eight worlds
 
-![The seven costumes](docs/costumes.png)
+As your score climbs the crab **changes costume on its own, and the world changes with it**: the sky, the far scenery, the ground, the weather. Each new stage gives a small bonus (+25) and puts its name under the score for a moment. Each world stays for about half a minute, long enough to enjoy before the next one arrives. Nothing pauses and nothing moves: the bugs, the clouds and the crab look and behave the same in every world, only the picture behind them changes.
+
+![The eight worlds, in the order you reach them](docs/journey.png)
+
+| score | costume | world |
+| --- | --- | --- |
+| 0 | plain | **Meadow**: the calm grey one |
+| 450 | swimmer | **Beach**: sun, sea, palms, gulls |
+| 900 | chef | **Kitchen**: shelves of pots with steam, tiled floor |
+| 1350 | racer | **Speedway**: grandstand, billboards, speed lines, kerb |
+| 1800 | engineer | **Build site**: cranes and girders, hazard stripes, sparks |
+| 2250 | detective | **Rainy city**: night skyline, street lamps, rain |
+| 2700 | pirate | **Storm at sea**: heavy rain, rolling waves, a ship on the horizon, a flash of lightning now and then |
+| 3150 | astronaut | **Moon**: stars, the Earth, craters, a meteor now and then |
+
+After the Moon it comes round again from the Meadow, and the game keeps getting faster. Every run starts again at the Meadow. If you would rather keep one costume (and its world) for the whole run, pick it in settings: then nothing changes. If you are sensitive to motion, the weather and other loops switch themselves off when your system asks for reduced motion.
+
+![The eight costumes](docs/costumes.png)
 
 ### On the desktop and in the terminal
 
-- **Desktop app:** a smooth picture, as wide as the band. Press **▶ play**, then any key.
+- **Desktop app:** a smooth picture, as wide as the band. Press **▶ play**, then **Space**. The first game of a session shows `J duck · K jump` in the picture, under the best score; after it the game is just the picture, and **K** (start, jump) and **J** (duck) still work.
 - **Terminal:** a pixel-block version (two pixels per character cell). It plays when the game is open **and the prompt box is empty**, so it never steals keys while you are typing.
 
 The rules are the same in both.
@@ -238,7 +256,7 @@ Change these from the plugin's settings in Claude Code.
 | setting | choices | default | what it does |
 | --- | --- | --- | --- |
 | `cacheTtlMinutes` | `5`, `60` | `60` | How long the `cache` countdown runs. Set it to match your cache: 60 for the extended cache, 5 for the standard one. |
-| `costume` | `auto`, `plain`, `astronaut`, `detective`, `engineer`, `chef`, `racer`, `pirate` | `auto` | The crab's outfit. `auto` gives a new one every run. |
+| `costume` | `auto`, `plain`, `swimmer`, `astronaut`, `detective`, `engineer`, `chef`, `racer`, `pirate` | `auto` | The crab's outfit. `auto` is the journey: the costume and the world change as your score climbs. Name one to keep it (and its world) for the whole run. |
 | `buddy` | `game`, `mascot`, `off` | `game` | While Claude works: `game` = mascot and the play button, `mascot` = just the animation, `off` = nothing. |
 | `motion` | `smooth`, `classic` | `smooth` | `smooth` = the display animates the game (steady at any speed). `classic` = redrawn step by step; use it only if a screen doesn't animate the picture. |
 
@@ -249,7 +267,7 @@ Change these from the plugin's settings in Claude Code.
 - **I installed it, but nothing changed.** Start a *new* session. Open sessions keep the plugin version they began with.
 - **The band shows `–` for `cache` or `ctx`.** Normal in a brand-new chat: the numbers appear after Claude's first reply.
 - **No `5h` / `7d`.** Those come from your Claude subscription. With an API key, Claude Code has no allowance to report.
-- **The keys don't play the game.** Click the line just above the game picture once (it says "click here, then any key" when the app didn't pass the keyboard over), then press any key. The mod writes what it sees to `~/.claude/status-band-trace.log` (kept across sessions, time-stamped). Look for `session.start vX.Y.Z` to see which version a chat loaded.
+- **The keys don't play the game.** The keys are read at the prompt box, so the prompt box has to be the thing that has the focus: press **Esc** (or click the prompt box) and try Space again. The mod writes what it sees to `~/.claude/status-band-trace.log` (kept across sessions, time-stamped). Look for `session.start vX.Y.Z` to see which version a chat loaded.
 - **"No room for the game here".** The window is too short. Make it taller; the game needs about 9 rows.
 - **No ▶ play button.** The band needs at least 30 columns, and the `buddy` setting must be `game`.
 - **Handoff said it didn't clear.** Type `/clear` yourself and paste: your note is saved in `~/.claude/handoffs/`.
@@ -260,7 +278,7 @@ Change these from the plugin's settings in Claude Code.
 
 ```bash
 npx -y -p typescript tsc -p .      # type-check
-claude plugin test .               # 110 tests
+claude plugin test .               # 145 tests
 claude plugin validate .
 ```
 
@@ -283,7 +301,7 @@ To rebuild the pictures in `docs/` (they are made from the mod's own drawing cod
 ```bash
 node --import ./scripts/ts-loader.mjs scripts/make-docs.ts /tmp/docs-build
 # then take screenshots of the .wrap / .grid element of band.html, preview.html (saved as game.png),
-# guide.html and costumes.html, at 2x scale
+# guide.html, costumes.html and journey.html, at 2x scale
 ```
 
 ## Credits and licence

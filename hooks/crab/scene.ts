@@ -14,6 +14,10 @@ import { POP_LIFE } from './game'
 import type { Config } from './game'
 import { layers, paintOrder } from './master'
 import type { Layers, Rect } from './master'
+import { r1, r2, r4, stamp } from './pix'
+import { STAGE_TICKS, stageOf } from './stages'
+import { themeOf } from './themes'
+import type { Theme } from './themes'
 
 export const SCENE = { h: 72, ground: 64, feet: 26 } as const
 
@@ -25,13 +29,11 @@ export type Plan = {
   phase: number
   /** ticks since the run ended, when it has: a crab already belly up carries on from where the fall had got to */
   overAge?: number
+  /** draw the key hint (the J and K keys) under the scoreboard: the first game of a session only */
+  hints?: boolean
 }
 
 type Tf = { t?: string; o?: number }
-
-/** A position to a tenth of a unit: moves smoothly, and the markup stays short. */
-const r1 = (n: number) => Math.round(n * 10) / 10
-const r2 = (n: number) => Math.round(n * 100) / 100
 
 type Pv = { type: 'translate' | 'rotate' | 'skewY' | 'scale'; v: string }
 type Prop = { wrap?: string; move?: (t: number) => Pv; fade?: (t: number) => number }
@@ -54,6 +56,7 @@ const PROPS: Partial<Record<CostumeId, Record<string, Prop>>> = {
   },
   racer: { flag: { wrap: 'translate(26 2)', move: t => ({ type: 'skewY', v: t % 2 ? '-12' : '0' }) } },
   pirate: { it: { move: t => ({ type: 'rotate', v: `${Math.floor(t / 3) % 2 ? 25 : 0} 27.5 15` }) } },
+  swimmer: { it: { move: t => ({ type: 'rotate', v: `${Math.floor(t / 5) % 2 ? 8 : 0} 25 12` }) } },
 }
 
 /** Rects as one path a color: a drawing is a few strokes, not a rect each, and the markup stays small. */
@@ -99,24 +102,6 @@ export const crabGroup = (id: CostumeId, tick: number, air: boolean, running: bo
   return `<g transform="translate(0 ${fy})"><g transform="translate(0 ${bob})">${body}</g><g transform="translate(0 ${legA})">${rects(l.la ?? [])}</g><g transform="translate(0 ${legB})">${rects(l.lb ?? [])}</g></g>`
 }
 
-// Pixel art, one letter a color. One path per color (a run of pixels is one stroke) keeps a frame small.
-const stamp = (x: number, y: number, rows: string[], map: Record<string, string>): string => {
-  const paths: Record<string, string> = {}
-  rows.forEach((row, dy) => {
-    for (let dx = 0; dx < row.length; ) {
-      const ch = row[dx] ?? '.'
-      let len = 1
-      while (row[dx + len] === ch) len++
-      if (map[ch]) paths[ch] = `${paths[ch] ?? ''}M${x + dx} ${y + dy}h${len}v1h-${len}z`
-      dx += len
-    }
-  })
-
-  return Object.entries(paths)
-    .map(([ch, d]) => `<path d="${d}" fill="${map[ch]}"/>`)
-    .join('')
-}
-
 // a ladybug, and a big green beetle: the bugs to dodge or fix
 const BUG = [
   '.k........k.', '..k......k..', '...bbbbbb...', '..bhhbbbbb..', '.bbhbbkbbbb.',
@@ -128,6 +113,13 @@ const BIG = [
   '.gggggkgggg.', '.gggggkgggg.', '.gggggkgggg.', 'k.ggggkggg.k', '.gggggkgggg.', '.k.k....k.k.',
 ]
 const BIG_COLORS = { g: '#3B9C5F', h: '#6CC58A', e: '#F8F6F1', k: '#1F1E1D' }
+// a stack of failing tests: three slabs, the top one with a warning mark
+const TOWER = [
+  'kkkkkkkkkkkk', 'kppppppppppk', 'krrrrwwrrrrk', 'krrrrwwrrrrk', 'krrrrrrrrrrk', 'krrrrwwrrrrk', 'kqqqqqqqqqqk', 'kkkkkkkkkkkk',
+  'kYYYYYYYYYYk', 'kyyyyyyyyyyk', 'kyyykkyyyyyk', 'kyyyyyyyyyyk', 'kyyyyyykkyyk', 'kyyyyyyyyyyk', 'kzzzzzzzzzzk', 'kkkkkkkkkkkk',
+  'kNNNNNNNNNNk', 'knnnnnnnnnnk', 'knnkknnnnnnk', 'knnnnnnnnnnk', 'knnnnnnkknnk', 'knnnnnnnnnnk', 'kmmmmmmmmmmk', 'kkkkkkkkkkkk',
+]
+const TOWER_COLORS = { k: '#1F1E1D', r: '#C0392B', p: '#E8786B', q: '#8E2A20', w: '#F8F6F1', y: '#E0A33C', Y: '#F2C878', z: '#A87820', n: '#8A5A2B', N: '#B07F4D', m: '#5E3D1C' }
 // the moth: it flies at the crab's chest, so the crab has to duck (or jump right over it)
 const MOTH_UP = [
   '.ww........ww.', 'wwww..kk..wwww', 'wwwww.pp.wwwww', '.wwwwppppwwww.', '..ww.pppp.ww..',
@@ -165,10 +157,11 @@ const ORB = (() => {
 })()
 const ORB_COLORS = { g: '#4CB878', h: '#B6F0CC', d: '#2E8A55', k: '#F8F6F1' }
 
-const CSS = `.gl{fill:#d4d3cf}.dash{fill:#c2c1bc}.cl{fill:#e6e5e1}.hl{fill:#ebeae6}.st{fill:#b9b8b3}.tx{fill:#6b4a00;font:700 7px ui-monospace,Menlo,monospace}.nt{fill:#85837d;font:600 7.5px ui-monospace,Menlo,monospace}.pf{fill:#c8c6c0}.hd{fill:#85837d;font:600 8px ui-monospace,Menlo,monospace;text-anchor:middle}.hs{fill:#4a4843}.hi{text-anchor:end}
-@media (prefers-color-scheme: dark){.gl{fill:#3a3a38}.dash{fill:#4a4a47}.cl{fill:#2c2c2b}.hl{fill:#262625}.st{fill:#6a6a66}.tx{fill:#ffd76a}.nt{fill:#a9a79f}.pf{fill:#55554f}.hd{fill:#a9a79f}.hs{fill:#e4e2db}}`
-
-const hash = (n: number) => (Math.imul(n + 1, 2654435761) >>> 0) / 4294967296
+// The meadow's own colors, and the text colors the card's light and dark take. Every other theme sets
+// its colors in the markup (themes.ts), so only these change with the card; the rest is the same in both.
+const CSS = `.gl{fill:#d4d3cf}.dash{fill:#c2c1bc}.cl{fill:#e6e5e1}.hl{fill:#ebeae6}.st{fill:#b9b8b3}.tx{fill:#6b4a00;font:700 7px ui-monospace,Menlo,monospace}.tp{font:700 7px ui-monospace,Menlo,monospace}.nt{font:600 7.5px ui-monospace,Menlo,monospace}.go{font:700 8px ui-monospace,Menlo,monospace;letter-spacing:1.2px}.bn{font:700 7px ui-monospace,Menlo,monospace;letter-spacing:.7px;text-anchor:end}.hd{font:600 8px ui-monospace,Menlo,monospace;text-anchor:middle}.hi{text-anchor:end}.ik-d{color:#85837d}.ik-s{color:#4a4843}
+@media (prefers-color-scheme: dark){.gl{fill:#3a3a38}.dash{fill:#4a4a47}.cl{fill:#2c2c2b}.hl{fill:#262625}.st{fill:#6a6a66}.tx{fill:#ffd76a}.ik-d{color:#a9a79f}.ik-s{color:#e4e2db}}
+@media (prefers-reduced-motion: reduce){.fx{display:none}}`
 
 // ---- time: everything below is a track over the plan's ticks -------------------------------------
 
@@ -207,8 +200,6 @@ const stepper = (c: Clock, attr: string, vals: string[], type?: 'translate' | 's
   return `<${tag} values="${runs.map(r => r.v).join(';')}" keyTimes="${runs.map(r => r4(r.at / c.n)).join(';')}" calcMode="discrete" dur="${sec(c.n * c.ms)}" begin="${begin(c)}" fill="freeze"/>`
 }
 
-const r4 = (n: number) => Math.round(n * 10000) / 10000
-
 /** Visible between two ticks, hidden before and after: a thing that comes in, or is taken out, mid-plan. */
 const showing = (c: Clock, present: boolean[]): { attr: string; anim: string; none: boolean } => {
   const first = present.indexOf(true)
@@ -230,82 +221,90 @@ const showing = (c: Clock, present: boolean[]): { attr: string; anim: string; no
 
 type Pt = { x: number; y: number }
 
-/** Far things scroll slower than the ground: a layer that moves `1/k` as far, over the world range it will cross. */
-const parallax = (c: Clock, states: Game[], k: number, inner: (from: number, to: number) => string): string => {
+/**
+ * Far things scroll slower than the ground: a layer that moves `1/k` as far, over the world range it
+ * will cross. `span` is the states (first to last) it will be seen in, when that is less than all.
+ */
+const parallax = (c: Clock, states: Game[], k: number, inner: (from: number, to: number) => string, span: readonly [number, number] = [0, states.length - 1]): string => {
   const offs = states.map(g => g.off / k)
-  const lo = Math.min(...offs)
-  const hi = Math.max(...offs)
+  const seen = offs.slice(span[0], span[1] + 1)
+  const lo = Math.min(...(seen.length > 0 ? seen : offs))
+  const hi = Math.max(...(seen.length > 0 ? seen : offs))
   const vals = offs.map(o => `${r1(-o)} 0`)
   const first = vals[0] ?? '0 0'
 
-  return `<g transform="translate(${first})">${lin(c, 'translate', vals, 6)}${inner(lo - 30, hi + 30)}</g>`
+  return `<g transform="translate(${first})">${lin(c, 'translate', vals, 24)}${inner(lo - 30, hi + 30)}</g>`
 }
 
-const sky = (c: Clock, states: Game[], w: number, ground: number): string => {
+/** How many ticks one world takes to give way to the next. */
+const FADE = 12
+
+/** A world the plan passes through: the states it is the current one in, and when it starts to give way (null: never, in this plan). */
+type World = { id: CostumeId; first: number; last: number; fadeFrom: number | null }
+
+/**
+ * The worlds of a plan, oldest first. A plan that begins just after a change of stage carries on the fade
+ * of the world it came from (it is still on screen, going), so a new picture never cuts a fade short.
+ */
+const worldsOf = (states: Game[]): World[] => {
+  const out: World[] = []
+  states.forEach((g, j) => {
+    const cur = out[out.length - 1]
+    if (cur && cur.id === g.costume) {
+      cur.last = j
+      return
+    }
+    if (cur) cur.fadeFrom = j
+    out.push({ id: g.costume, first: j, last: j, fadeFrom: null })
+  })
+  const g0 = states[0]
+  if (g0 && states.length > 1 && g0.auto && g0.stage > 0 && g0.stageAge >= 0 && g0.stageAge < FADE) {
+    out.unshift({ id: stageOf(g0.stage - 1).costume, first: 0, last: -1, fadeFrom: -g0.stageAge })
+  }
+
+  return out
+}
+
+/** The sky: bands of color from the top down (each runs on to the ground, so the next covers it with no seam). */
+const skyBands = (colors: readonly string[], w: number, ground: number): string => {
+  const step = Math.ceil(ground / colors.length)
+
+  return colors.map((color, i) => `<rect x="0" y="${i * step}" width="${w}" height="${ground - i * step}" fill="${color}"/>`).join('')
+}
+
+/** One theme's whole world: sky, far scenery, ground, weather. Each layer scrolls at its own pace. */
+const worldArt = (c: Clock, states: Game[], t: Theme, span: readonly [number, number], w: number, ground: number): string => {
   const parts: string[] = []
-  // far hills, slow
-  parts.push(
-    parallax(c, states, 5, (lo, hi) => {
-      const pts: Pt[] = []
-      for (let x = Math.floor(lo / 12) * 12; x <= hi + w + 24; x += 12) {
-        pts.push({ x, y: ground - 6 - 5 * (1 + Math.sin(x / 31)) - 3 * (1 + Math.sin(x / 13 + 1)) })
-      }
-      const d = pts.map((p, i) => `${i ? 'L' : 'M'}${r1(p.x)} ${r1(p.y)}`).join('')
-      const a = pts[0]?.x ?? 0
-      const b = pts[pts.length - 1]?.x ?? 0
-
-      return `<path class="hl" d="${d}L${r1(b)} ${ground}L${r1(a)} ${ground}z"/>`
-    }),
-  )
-  // stars, up high; they twinkle on three clocks
-  parts.push(
-    parallax(c, states, 11, (lo, hi) => {
-      const groups: string[] = ['', '', '']
-      for (let i = Math.floor(lo / 17); i * 17 <= hi + w + 20; i++) {
-        const h = hash(i * 7 + 3)
-        if (h < 0.45) continue
-        const k = ((i % 3) + 3) % 3
-        const size = h > 0.85 ? 2 : 1
-        groups[k] += `M${r1(i * 17 + h * 9)} ${Math.round(3 + hash(i + 91) * 26)}h${size}v${size}h-${size}z`
-      }
-
-      return groups
-        .map((d, k) => `<path class="st" d="${d}"><animate attributeName="opacity" values="1;.25;1" dur="${r2(2.2 + k * 0.7)}s" begin="-${r2(k * 0.9)}s" repeatCount="indefinite"/></path>`)
-        .join('')
-    }),
-  )
-  // far clouds, a little faster than the hills
-  parts.push(
-    parallax(c, states, 6, (lo, hi) => {
-      let d = ''
-      for (let i = Math.floor(lo / 130); i * 130 <= hi + w + 40; i++) {
-        const h = hash(i * 13 + 5)
-        const x = r1(i * 130 + h * 50)
-        const y = 8 + Math.floor(hash(i + 17) * 14)
-        const len = 12 + Math.floor(h * 10)
-        d += `M${x} ${y}h${len}v3h-${len}zM${r1(x + 3)} ${y - 2}h${len - 6}v2h-${len - 6}z`
-      }
-
-      return `<path class="cl" d="${d}"/>`
-    }),
-  )
+  if (t.sky) parts.push(skyBands(t.sky, w, ground))
+  for (const far of t.far) parts.push(parallax(c, states, far.k, (lo, hi) => far.draw(lo, hi, w, ground), span))
+  if (t.floor.fill) parts.push(`<rect x="0" y="${ground}" width="${w}" height="${SCENE.h - ground}" fill="${t.floor.fill}"/>`)
+  parts.push(t.floor.line ? `<rect x="0" y="${ground}" width="${w}" height="1" fill="${t.floor.line}"/>` : `<rect class="gl" x="0" y="${ground}" width="${w}" height="1"/>`)
+  parts.push(parallax(c, states, 1, (lo, hi) => t.floor.draw(lo, hi, w, ground), span))
+  parts.push(t.fx(w, ground, SCENE.h))
 
   return parts.join('')
 }
 
-const groundLayer = (c: Clock, states: Game[], w: number, ground: number): string => {
-  const line = `<rect class="gl" x="0" y="${ground}" width="${w}" height="1"/>`
-  const dashes = parallax(c, states, 1, (lo, hi) => {
-    let d = ''
-    for (let i = Math.floor(lo / 28); i * 28 <= hi + w + 28; i++) {
-      d += `M${i * 28 + 6} ${ground + 3 + (((i % 2) + 2) % 2) * 2}h${6 - (((i % 3) + 3) % 3)}v1h-${6 - (((i % 3) + 3) % 3)}z`
-    }
+/** All the worlds of a plan, the newest at the bottom: an old world is on top of the new one and fades away to show it. */
+const worlds = (c: Clock, states: Game[], w: number, ground: number): string =>
+  worldsOf(states)
+    .map(run => {
+      const end = run.fadeFrom === null ? states.length - 1 : Math.min(states.length - 1, run.fadeFrom + FADE)
+      const present = states.map((_, j) => j >= run.first && j <= end)
+      const show = showing(c, present)
+      if (show.none) return ''
+      const art = worldArt(c, states, themeOf(run.id), [Math.max(0, run.first), end], w, ground)
+      if (run.fadeFrom === null || run.fadeFrom >= c.n) return `<g${show.attr}>${show.anim}${art}</g>`
+      const at: number = run.fadeFrom
+      const from = Math.max(0, at)
+      const to = Math.min(c.n, at + FADE)
+      const o = (t: number) => r2(1 - (t - at) / FADE)
+      const fade = `<animate attributeName="opacity" values="${o(from)};${o(to)}" dur="${sec((to - from) * c.ms)}" begin="${begin(c, from)}" fill="freeze"/>`
 
-    return `<path class="dash" d="${d}"/>`
-  })
-
-  return line + dashes
-}
+      return `<g${show.attr} opacity="${from > 0 ? 1 : o(from)}">${show.anim}${fade}${art}</g>`
+    })
+    .reverse()
+    .join('')
 
 // ---- things that come and go ---------------------------------------------------------------------
 
@@ -350,7 +349,7 @@ const movers = <T extends { id: number; x: number }>(
       if (!t0) return ''
       const vals = xs.map(x => `${r1(x)} ${r1(y(t0))}`)
 
-      return `<g transform="translate(${vals[0]})"${show.attr}>${show.anim}${lin(c, 'translate', vals, 2)}${draw(t0)}</g>`
+      return `<g transform="translate(${vals[0]})"${show.attr}>${show.anim}${lin(c, 'translate', vals, 8)}${draw(t0)}</g>`
     })
     .join('')
 
@@ -366,6 +365,7 @@ const pitArt = (w: number, ground: number): string =>
 
 const bugArt = (kind: Kind, w: number, c: Clock, ground: number): string => {
   if (kind === 'beetle') return stamp(0, 0, BIG, BIG_COLORS)
+  if (kind === 'tower') return stamp(0, 0, TOWER, TOWER_COLORS)
   if (kind === 'twin') return `${stamp(0, 0, BUG, BUG_COLORS)}<g transform="translate(${w - 12} 0)">${stamp(0, 0, BUG, BUG_COLORS)}</g>`
   if (kind === 'pit') return pitArt(w, ground)
   if (kind === 'moth') {
@@ -395,8 +395,10 @@ const bursts = (c: Clock, states: Game[], ground: number): string =>
       const fade = (keys: string) => `<animate attributeName="opacity" values="1;1;0" keyTimes="${keys}" dur="${dur}" begin="${t(0)}" fill="freeze"/>`
       if (p.kind === 'text') {
         const y = r1(ground - p.h - 4)
+        const pop = themeOf(states[Math.min(Math.max(0, born), states.length - 1)]?.costume ?? 'plain').pop
+        const paint = pop ? `class="tp" fill="${pop}"` : 'class="tx"'
 
-        return `<g visibility="hidden" transform="translate(${r1(p.x)} ${y})">${live}<animateTransform attributeName="transform" type="translate" values="${r1(p.x)} ${y};${r1(p.x)} ${y - 12}" dur="${dur}" begin="${t(0)}" fill="freeze"/><text class="tx" x="0" y="0">${fade('0;.6;1')}${p.text ?? ''}</text></g>`
+        return `<g visibility="hidden" transform="translate(${r1(p.x)} ${y})">${live}<animateTransform attributeName="transform" type="translate" values="${r1(p.x)} ${y};${r1(p.x)} ${y - 12}" dur="${dur}" begin="${t(0)}" fill="freeze"/><text ${paint} x="0" y="0">${fade('0;.6;1')}${p.text ?? ''}</text></g>`
       }
       const b = BURST[p.kind]
       const dots = Array.from({ length: b.n }, (_, i) => {
@@ -414,10 +416,8 @@ const bursts = (c: Clock, states: Game[], ground: number): string =>
 
 // ---- the crab -------------------------------------------------------------------------------------
 
-const crabLive = (c: Clock, states: Game[], cfg: Config, ground: number): string => {
-  const g0 = states[0]
-  if (!g0) return ''
-  const id = g0.costume
+/** One costume's crab at the origin of its box: its legs, bob and props move on the plan's ticks. */
+const crabBody = (c: Clock, states: Game[], id: CostumeId): string => {
   const l: Layers = layers(id)
   const float = id === 'astronaut'
   const racing = id === 'racer'
@@ -453,9 +453,25 @@ const crabLive = (c: Clock, states: Game[], cfg: Config, ground: number): string
     })
     .join('')
 
+  return `<g transform="translate(${fy[0]})">${stepper(c, 'transform', fy, 'translate')}<g transform="translate(${bob[0]})">${stepper(c, 'transform', bob, 'translate')}${body}</g><g transform="translate(${legA[0]})">${stepper(c, 'transform', legA, 'translate')}${rects(l.la ?? [])}</g><g transform="translate(${legB[0]})">${stepper(c, 'transform', legB, 'translate')}${rects(l.lb ?? [])}</g></g>`
+}
+
+const crabLive = (c: Clock, states: Game[], cfg: Config, ground: number): string => {
+  if (!states[0]) return ''
+  // the costume can change inside a plan (a new stage): each one shown for its own ticks, the rest of the crab shared
+  const crab = [...new Set(states.map(g => g.costume))]
+    .map(id => {
+      const present = states.map(g => g.costume === id)
+      const s = showing(c, present)
+      // out of its own ticks a crab holds still, so its tracks are short
+      const [from, to] = [present.indexOf(true), present.lastIndexOf(true)]
+      const own = states.map((_, j) => states[Math.min(Math.max(j, from), to)] ?? states[0] as Game)
+
+      return `<g${s.attr}>${s.anim}${crabBody(c, own, id)}</g>`
+    })
+    .join('')
   const duckScale = states.map(g => (g.duck > 0 && g.jump < 0 && g.mode === 'play' ? '1.1 .5' : '1 1'))
   const lift = states.map(g => `${cfg.crabX} ${r1(ground - SCENE.feet - g.y)}`)
-  const crab = `<g transform="translate(${fy[0]})">${stepper(c, 'transform', fy, 'translate')}<g transform="translate(${bob[0]})">${stepper(c, 'transform', bob, 'translate')}${body}</g><g transform="translate(${legA[0]})">${stepper(c, 'transform', legA, 'translate')}${rects(l.la ?? [])}</g><g transform="translate(${legB[0]})">${stepper(c, 'transform', legB, 'translate')}${rects(l.lb ?? [])}</g></g>`
   const squash = `<g transform="translate(15 ${SCENE.feet})"><g transform="scale(${duckScale[0]})">${stepper(c, 'transform', duckScale, 'scale')}<g transform="translate(-15 -${SCENE.feet})">${crab}</g></g></g>`
 
   // the shield: a soft bubble, blinking while the grace after it is spent runs out
@@ -495,7 +511,8 @@ const crabLost = (c: Clock, states: Game[], cfg: Config, overAge: number | undef
 
 // ---- the scoreboard ------------------------------------------------------------------------------
 // The score, the clouds and the bugs fixed are drawn into the picture and counted by the picture, so
-// the band never has to be redrawn to keep them current (a redraw can restart the animation).
+// the band never has to be redrawn to keep them current (a redraw can restart the animation). They
+// all sit in the top right corner, so the crab's whole jump, at the left, has clear air above it.
 
 const HUD_STEP = 5.4
 
@@ -525,37 +542,117 @@ const counter = (c: Clock, vals: number[], len: number, x: number, y: number, cl
 const CLOUD_ICON = ['..ww..', '.wwww.', 'wwwwww', '.dddd.']
 const CHECK_ICON = [[0, 2], [1, 3], [2, 2], [3, 1], [4, 0]] as const
 
+/** Text over a theme takes that theme's ink, which changes with the world (a group's color, inherited by what is in it). */
+const ink = (c: Clock, states: Game[], which: 'strong' | 'dim', inner: string): string => {
+  const vals = states.map(g => themeOf(g.costume).ink[which] ?? 'currentColor')
+
+  return `<g class="${which === 'strong' ? 'ik-s' : 'ik-d'}" fill="${vals[0]}">${stepper(c, 'fill', vals)}${inner}</g>`
+}
+
+const EDGE = 6
+/** The scoreboard's width, from the right edge to the cloud icon at its far left. */
+const HUD_SPAN = 122
+/** Where the scoreboard begins, from the left. */
+const hudLeft = (w: number) => w - EDGE - HUD_SPAN
+
+/** Right to left: the best, the score, the bugs fixed, the clouds. Digits are centred, so a counter is placed by its first digit's centre. */
 const hud = (c: Clock, states: Game[], w: number): string => {
   const g0 = states[0]
   if (!g0) return ''
-  const right = w - 6
+  const right = w - EDGE
+  const scoreAt = right - 7 * 4.9 - 8 - 4 * HUD_STEP
+  const fixedAt = scoreAt - 10 - 2 * HUD_STEP
+  const checkAt = fixedAt - 4 - 5
+  const grabbedAt = checkAt - 10 - 2 * HUD_STEP
+  const half = HUD_STEP / 2
   const hi = `<text class="hd hi" x="${right}" y="9">HI ${digits(g0.best, 4)}</text>`
-  const scoreX = right - 7 * 4.9 - 8 - 4 * HUD_STEP + HUD_STEP / 2
-  const score = counter(c, states.map(g => g.score), 4, scoreX, 9, 'hd hs')
-  const clouds = `<g transform="translate(6 3)">${stamp(0, 0, CLOUD_ICON, CLOUD_COLORS)}</g>${counter(c, states.map(g => g.grabbed), 2, 16, 9, 'hd')}`
-  const check = CHECK_ICON.map(([x, y]) => `<rect x="${34 + x}" y="${3 + y}" width="1" height="1" fill="#3B9C5F"/>`).join('')
+  const score = counter(c, states.map(g => g.score), 4, r1(scoreAt + half), 9, 'hd hs')
+  const clouds = `<g transform="translate(${r1(grabbedAt - 7.3)} 3)">${stamp(0, 0, CLOUD_ICON, CLOUD_COLORS)}</g>${counter(c, states.map(g => g.grabbed), 2, r1(grabbedAt + half), 9, 'hd')}`
+  const check = CHECK_ICON.map(([x, y]) => `<rect x="${r1(checkAt + x)}" y="${3 + y}" width="1" height="1" fill="#3B9C5F"/>`).join('')
+  const fixed = counter(c, states.map(g => g.fixed), 2, r1(fixedAt + half), 9, 'hd')
 
-  return hi + score + clouds + check + counter(c, states.map(g => g.fixed), 2, 46, 9, 'hd')
+  return ink(c, states, 'dim', hi + clouds + check + fixed) + ink(c, states, 'strong', score)
 }
 
 // ---- the whole scene -----------------------------------------------------------------------------
 
-const note = (c: Clock, states: Game[], w: number): string => {
-  const runs: { text: string; first: number; last: number }[] = []
+/** What the strip says before a run starts, and when it ends (the keys are the hint under the scoreboard). */
+const READY_TEXT = 'grab clouds, dodge or fix bugs'
+const OVER_TEXT = 'GAME OVER'
+
+/** How wide a letter is in each of the strip's two styles, in the picture's units. */
+const LETTER = { note: 4.6, over: 6.2 } as const
+/** The strip starts right of the crab's jump column. */
+const STRIP_FROM = 80
+
+/**
+ * Where a line of the strip goes: the clear top row between the crab's column and the scoreboard,
+ * where no cloud flies but the highest. A line too long for it (a narrow field) drops to the middle
+ * of the picture, where it can cross a cloud.
+ */
+const strip = (w: number, chars: number, letter: number) => {
+  const room = hudLeft(w) - 8 - STRIP_FROM
+
+  return chars * letter <= room ? { x: r1(STRIP_FROM + room / 2), y: 9 } : { x: w / 2, y: 20 }
+}
+
+/** The strip's text for a state: a note on its first sight of a kind, GAME OVER once the run ends. */
+const stripOf = (g: Game): { text: string; over: boolean } =>
+  g.mode === 'over' ? { text: OVER_TEXT, over: true } : { text: g.mode === 'ready' ? READY_TEXT : g.note, over: false }
+
+/** The strip: the notes (dim ink) and GAME OVER (strong ink), each shown for the ticks it is the state's. */
+const note = (c: Clock, states: Game[], w: number): { dim: string; strong: string } => {
+  const runs: { text: string; over: boolean; first: number; last: number }[] = []
   states.forEach((g, j) => {
+    const { text, over } = stripOf(g)
     const last = runs[runs.length - 1]
-    if (g.note && last && last.text === g.note && last.last === j - 1) last.last = j
-    else if (g.note) runs.push({ text: g.note, first: j, last: j })
+    if (text && last && last.text === text && last.last === j - 1) last.last = j
+    else if (text) runs.push({ text, over, first: j, last: j })
+  })
+  const draw = (over: boolean) =>
+    runs
+      .filter(r => r.over === over)
+      .map(r => {
+        const s = showing(c, states.map((_, j) => j >= r.first && j <= r.last))
+        const at = strip(w, r.text.length, over ? LETTER.over : LETTER.note)
+
+        return `<text class="${over ? 'go' : 'nt'}" x="${at.x}" y="${at.y}" text-anchor="middle"${s.attr}>${s.anim}${r.text}</text>`
+      })
+      .join('')
+
+  return { dim: draw(false), strong: draw(true) }
+}
+
+/** The title of a new stage, under the score: it comes in, stays a moment and goes, beside the notes and never over them. */
+const banner = (c: Clock, states: Game[], w: number): string => {
+  const runs: { stage: number; first: number; last: number }[] = []
+  states.forEach((g, j) => {
+    if (!(g.auto && g.stage > 0 && g.stageAge >= 0)) return
+    const last = runs[runs.length - 1]
+    if (last && last.stage === g.stage && last.last === j - 1) last.last = j
+    else runs.push({ stage: g.stage, first: j, last: j })
   })
 
   return runs
     .map(r => {
-      const present = states.map((_, j) => j >= r.first && j <= r.last)
-      const s = showing(c, present)
+      const s = showing(c, states.map((_, j) => j >= r.first && j <= r.last))
+      // in over a few ticks, out over a dozen; four steps of opacity are plenty
+      const op = states.map(g => String(g.stageAge < 0 ? 0 : Math.round(Math.min(1, (g.stageAge + 1) / 6, (STAGE_TICKS - g.stageAge) / 12) * 4) / 4))
 
-      return `<text class="nt" x="${w / 2}" y="20" text-anchor="middle"${s.attr}>${s.anim}${r.text}</text>`
+      return `<text class="bn" x="${w - 6}" y="20" opacity="${op[0]}"${s.attr}>${s.anim}${stepper(c, 'opacity', op)}${stageOf(r.stage).name}</text>`
     })
     .join('')
+}
+
+/** The first game's key hint, right-aligned under the best score with a clear row between (it steps aside for the stage title, which sits between them). */
+const HINT_TEXT = 'J duck · K jump'
+const HINT_Y = 27
+
+const keyHint = (c: Clock, states: Game[], w: number): string => {
+  const s = showing(c, states.map(g => !(g.auto && g.stage > 0 && g.stageAge >= 0)))
+  if (s.none) return ''
+
+  return `<text class="bn" x="${w - EDGE}" y="${HINT_Y}"${s.attr}>${s.anim}${HINT_TEXT}</text>`
 }
 
 /**
@@ -564,18 +661,20 @@ const note = (c: Clock, states: Game[], w: number): string => {
  * on the display's own clock; with one state alone it is a still.
  */
 export const motionSvg = (plan: Plan, cfg: Config, size: { width: number; height: number }): string => {
-  const { states, phase, overAge } = plan
+  const { states, phase, overAge, hints } = plan
   const { h, ground } = SCENE
   const w = cfg.width
   const c: Clock = { n: Math.max(0, states.length - 1), ms: cfg.tickMs, phase }
 
-  const parts: string[] = [sky(c, states, w, ground), groundLayer(c, states, w, ground)]
+  const parts: string[] = [worlds(c, states, w, ground)]
   parts.push(movers(c, follow(states, g => g.clouds), x => ground - x.h - (x.shield ? ORB.length : CLOUD.length), x => (x.shield ? stamp(0, 0, ORB, ORB_COLORS) : stamp(0, 0, CLOUD, CLOUD_COLORS))))
   parts.push(movers(c, follow(states, g => g.obs), o => (o.kind === 'pit' ? 0 : ground - o.base - o.h), o => bugArt(o.kind, o.w, c, ground)))
   parts.push(bursts(c, states, ground))
   parts.push(crabLive(c, states, cfg, ground))
   parts.push(crabLost(c, states, cfg, overAge, ground))
-  parts.push(note(c, states, w))
+  const lines = note(c, states, w)
+  parts.push(ink(c, states, 'dim', lines.dim + banner(c, states, w) + (hints ? keyHint(c, states, w) : '')))
+  if (lines.strong) parts.push(ink(c, states, 'strong', lines.strong))
   parts.push(hud(c, states, w))
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size.width}" height="${size.height}" viewBox="0 0 ${w} ${h}" shape-rendering="crispEdges"><style>${CSS}</style>${parts.join('')}</svg>`

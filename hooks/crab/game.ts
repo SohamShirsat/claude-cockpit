@@ -4,10 +4,15 @@
 // No `$`, no timers: the callers own the clock and draw the result.
 //
 // The story: the crab is Claude, and these are bugs. Jump them, stomp them (a bug you land on is
-// fixed), duck under the moths, hop the segfault pits, and grab the clouds and the green shield.
+// fixed), duck under the moths, hop the segfault pits, clear the tall stacks, and grab the clouds
+// and the green shield. As the score climbs the crab changes costume and the world with it (see
+// stages.ts); how hard it gets depends on the score alone.
 
 import type { Cloud, CostumeId, Game, GameMode, Kind, Obstacle, Pop } from '../../types'
+import { gauntletChance, GAUNTLETS } from './gauntlet'
+import type { Piece } from './gauntlet'
 import { ARC, HIT } from './mini'
+import { STAGE_BONUS, STAGE_TICKS, stageAt, stageOf } from './stages'
 
 export type { Cloud, Game, GameMode, Kind, Obstacle, Pop }
 
@@ -40,8 +45,10 @@ export type Config = {
   invTicks: number
   speed: (score: number) => number
   /** extra ticks, from a random number, on top of the shortest safe wait before the next obstacle
-   *  (see `step`: room for a whole jump even if the run speeds up before they reach the crab) */
+   *  (see `step`: room for a whole jump, at the speed the run will have when they reach the crab) */
   gap: (r: number) => number
+  /** ticks of slack, beyond one whole jump, kept between two obstacles */
+  margin: number
   firstGap: number
   /** which obstacles exist, the score each starts at, and how often each comes */
   kinds: readonly Kind[]
@@ -50,6 +57,10 @@ export type Config = {
   /** `r` is a random number; a bug is any size from the range */
   bug: { w: (r: number) => number; h: number }
   big: { w: number; h: number }
+  /** the tall stack: only a jump near the top of its arc clears it */
+  tower: { w: number; h: number }
+  /** the chance, from the score, that the next obstacle is a gauntlet (a set piece, see gauntlet.ts) */
+  gauntlet: (score: number) => number
   moth: { w: number; h: number; base: number }
   twin: { w: number }
   pit: { w: (r: number) => number }
@@ -61,9 +72,9 @@ export type Config = {
   notes: boolean
 }
 
-export const ROTATION: readonly CostumeId[] = ['plain', 'astronaut', 'detective', 'engineer', 'chef', 'racer', 'pirate']
+export const COSTUME_IDS: readonly CostumeId[] = ['plain', 'swimmer', 'astronaut', 'detective', 'engineer', 'chef', 'racer', 'pirate']
 
-const ALL: Record<Kind, number> = { bug: 0, beetle: 0, moth: 0, twin: 0, pit: 0 }
+const ALL: Record<Kind, number> = { bug: 0, beetle: 0, moth: 0, twin: 0, pit: 0, tower: 0 }
 
 /** The terminal's tuning: cols wide, the crab nine pixels, a jump three pixels high; just bugs and clouds. */
 export const termConfig = (cols: number): Config => ({
@@ -84,12 +95,15 @@ export const termConfig = (cols: number): Config => ({
   invTicks: 0,
   speed: score => (score >= 200 ? 2 : 1),
   gap: r => r % 12,
+  margin: 4,
   firstGap: 16,
   kinds: ['bug', 'beetle'],
   unlock: { ...ALL, beetle: 60 },
   weight: { ...ALL, bug: 4, beetle: 2 },
   bug: { w: r => 1 + (r % 2), h: 2 },
   big: { w: 1, h: 3 },
+  tower: { w: 1, h: 3 },
+  gauntlet: () => 0,
   moth: { w: 1, h: 1, base: 3 },
   twin: { w: 3 },
   pit: { w: () => 3 },
@@ -131,15 +145,18 @@ export const deskConfigFor = (width: number): Config => ({
   stomp: 10,
   duckTicks: 16,
   invTicks: 30,
-  // 100 units a second to start, quickening smoothly to 185
-  speed: score => Math.min(7.4, 4 + score / 400),
-  gap: r => r % 24,
-  firstGap: 18,
-  kinds: ['bug', 'beetle', 'moth', 'twin', 'pit'],
-  unlock: { bug: 0, beetle: 60, moth: 110, twin: 180, pit: 260 },
-  weight: { bug: 5, beetle: 3, moth: 4, twin: 3, pit: 3 },
+  // 125 units a second to start, quickening smoothly to 215 by a score of about 800
+  speed: score => Math.min(8.6, 5 + score / 220),
+  gap: r => r % 14,
+  margin: 2,
+  firstGap: 14,
+  kinds: ['bug', 'beetle', 'moth', 'twin', 'pit', 'tower'],
+  unlock: { bug: 0, beetle: 40, moth: 70, twin: 120, pit: 180, tower: 300 },
+  weight: { bug: 5, beetle: 3, moth: 4, twin: 3, pit: 3, tower: 2 },
   bug: { w: () => 12, h: 9 },
   big: { w: 12, h: 13 },
+  tower: { w: 12, h: 24 },
+  gauntlet: gauntletChance,
   moth: { w: 14, h: 9, base: 11 },
   twin: { w: 27 },
   pit: { w: r => 26 + (r % 5) * 4 },
@@ -157,6 +174,7 @@ export const NOTES: Record<Kind | 'orb', string> = {
   moth: 'moth! duck under it with ↓ or J',
   twin: 'twin bugs! one long jump',
   pit: 'segfault! jump the gap',
+  tower: 'stack overflow! jump high, or land on top',
   orb: 'tests passing! grab the shield',
 }
 
@@ -164,21 +182,23 @@ export const NOTE_TICKS = 75
 
 const rand = (seed: number) => (seed * 16807) % 2147483647
 
-export type Look = Pick<Game, 'costume' | 'auto' | 'run'>
+export type Look = Pick<Game, 'costume' | 'auto'>
 
-/** Which costume a setting names, or null for "a new one every run". */
-export const costumeOf = (setting: string | undefined): CostumeId | null => ROTATION.find(c => c === setting) ?? null
+/** Which costume a setting names, or null for "the journey" (auto). */
+export const costumeOf = (setting: string | undefined): CostumeId | null => COSTUME_IDS.find(c => c === setting) ?? null
 
-/** The look at the start: the named costume, or the rotation from `start`. */
-export const lookFor = (setting: string | undefined, start: number): Look => {
+/** The look at the start: the named costume, or the first stage of the journey. */
+export const lookFor = (setting?: string): Look => {
   const named = costumeOf(setting)
-  const run = Math.max(0, Math.floor(start))
 
-  return { costume: named ?? ROTATION[run % ROTATION.length] ?? 'plain', auto: named === null, run }
+  return { costume: named ?? stageOf(0).costume, auto: named === null }
 }
 
 export const fresh = (best: number, seed: number, mode: GameMode, look: Look, cfg: Config): Game => ({
-  ...look,
+  costume: look.costume,
+  auto: look.auto,
+  stage: 0,
+  stageAge: -1,
   mode,
   tick: 0,
   y: 0,
@@ -240,6 +260,41 @@ const pick = (cfg: Config, score: number, seed: number): Kind => {
   }
 
   return 'bug'
+}
+
+/** How big a kind of obstacle is, and how far its underside is off the ground; `r` is a random number (a bug is any size from the range). */
+const shapeOf = (cfg: Config, kind: Kind, r: number): { w: number; h: number; base: number } => {
+  switch (kind) {
+    case 'beetle':
+      return { ...cfg.big, base: 0 }
+    case 'tower':
+      return { ...cfg.tower, base: 0 }
+    case 'moth':
+      return { w: cfg.moth.w, h: cfg.moth.h, base: cfg.moth.base }
+    case 'twin':
+      return { w: cfg.twin.w, h: cfg.bug.h, base: 0 }
+    case 'pit':
+      return { w: cfg.pit.w(r), h: 0, base: 0 }
+    default:
+      return { w: cfg.bug.w(r), h: cfg.bug.h, base: 0 }
+  }
+}
+
+/** The pieces of one spawn, set just past the field's right edge: the obstacles, and where the last of them starts and how wide it is. */
+export const place = (cfg: Config, pieces: readonly Piece[], seed: number, nid: number) => {
+  const obs: Obstacle[] = []
+  let at = 0
+  let last = { start: 0, w: 0 }
+  for (const p of pieces) {
+    seed = rand(seed)
+    const shape = shapeOf(cfg, p.kind, seed)
+    at += p.after
+    obs.push({ id: nid++, x: cfg.width + at, w: shape.w, h: shape.h, base: shape.base, tall: p.kind === 'beetle', kind: p.kind })
+    last = { start: at, w: shape.w }
+    at += shape.w
+  }
+
+  return { obs, seed, nid, last }
 }
 
 export const step = (g: Game, cfg: Config): Game => {
@@ -361,11 +416,27 @@ export const step = (g: Game, cfg: Config): Game => {
     sinceCloud: sinceCloud + 1,
     sinceOrb: sinceOrb + 1,
     noteAge: g.noteAge >= 0 && g.noteAge < NOTE_TICKS ? g.noteAge + 1 : -1,
+    stageAge: g.stageAge >= 0 && g.stageAge < STAGE_TICKS ? g.stageAge + 1 : -1,
   }
   if (next.noteAge < 0) next.note = ''
 
-  const score = g.score + cfg.perTick + caught * cfg.cloudPoints + bonus
+  let score = g.score + cfg.perTick + caught * cfg.cloudPoints + bonus
   if (dead) return { ...next, mode: 'over', cause, score, best: Math.max(g.best, Math.floor(g.score)) }
+
+  // the journey: a score that reaches the next stage changes the costume (the world follows it in the
+  // picture), pays a little, and puts the stage's title up. It never pauses or moves anything.
+  const reached = g.auto ? stageAt(score) : g.stage
+  if (reached > g.stage) {
+    next.stage = reached
+    next.costume = stageOf(reached).costume
+    next.stageAge = 0
+    score += STAGE_BONUS
+    next.pops = [
+      ...next.pops,
+      { id: next.nid++, x: cfg.crabX + 15, h: y + cfg.crabH / 2, age: 0, kind: 'spark' },
+      { id: next.nid++, x: cfg.crabX + 2, h: y + cfg.crabH + 8, age: 0, kind: 'text', text: `+${STAGE_BONUS}` },
+    ]
+  }
 
   // the first of each kind says what it is
   const say = (kind: Kind | 'orb') => {
@@ -378,17 +449,28 @@ export const step = (g: Game, cfg: Config): Game => {
   if (next.since >= gap) {
     seed = rand(seed)
     const kind = pick(cfg, g.score, seed)
-    seed = rand(seed)
-    const w = kind === 'beetle' ? cfg.big.w : kind === 'moth' ? cfg.moth.w : kind === 'twin' ? cfg.twin.w : kind === 'pit' ? cfg.pit.w(seed) : cfg.bug.w(seed)
-    const h = kind === 'beetle' ? cfg.big.h : kind === 'moth' ? cfg.moth.h : kind === 'pit' ? 0 : cfg.bug.h
-    const base = kind === 'moth' ? cfg.moth.base : 0
-    seed = rand(seed)
-    // two obstacles this far apart are a whole jump apart even at the run's top speed
-    gap = Math.ceil(((cfg.arc.length + 4) * cfg.speed(Number.MAX_SAFE_INTEGER)) / speed) + cfg.gap(seed) + Math.ceil(w / speed)
-    next.obs = [...obs, { id: next.nid++, x: cfg.width, w, h, base, tall: kind === 'beetle', kind }]
+    // now and then the next thing is a set piece (a gauntlet) of kinds that are already open
+    const chance = cfg.gauntlet(g.score)
+    const open = chance > 0 ? GAUNTLETS.filter(t => g.score >= t.unlock && t.pieces.every(p => g.score >= cfg.unlock[p.kind])) : []
+    let pieces: readonly Piece[] = [{ kind, after: 0 }]
+    if (open.length > 0) {
+      seed = rand(seed)
+      if ((seed % 1000) / 1000 < chance) {
+        seed = rand(seed)
+        pieces = open[seed % open.length]?.pieces ?? pieces
+      }
+    }
+    const set = place(cfg, pieces, seed, next.nid)
+    seed = rand(set.seed)
+    // two obstacles this far apart are a whole jump apart (plus a little slack) at the speed the run
+    // will have when they reach the crab, which is a little more than it has now
+    const arrival = cfg.speed(g.score + (cfg.perTick * (cfg.width - cfg.crabX)) / speed)
+    gap = Math.ceil(((cfg.arc.length + cfg.margin) * arrival + set.last.start + set.last.w) / speed) + cfg.gap(seed)
+    next.obs = [...obs, ...set.obs]
+    next.nid = set.nid
     next.since = 0
     next.gap = gap
-    say(kind)
+    for (const p of pieces) say(p.kind)
   }
   if (next.sinceCloud >= cloudGap) {
     seed = rand(seed)
@@ -416,10 +498,8 @@ export const step = (g: Game, cfg: Config): Game => {
 export const act = (g: Game, cfg: Config, move: 'jump' | 'duck' = 'jump'): Game => {
   if (g.mode === 'ready') return fresh(g.best, g.seed, 'play', g, cfg)
   if (g.mode === 'over') {
-    const run = g.auto ? g.run + 1 : g.run
-    const costume = g.auto ? (ROTATION[run % ROTATION.length] ?? g.costume) : g.costume
-
-    return fresh(g.best, g.seed, 'play', { ...g, run, costume }, cfg)
+    // a new run starts the journey again from the first stage; a named costume stays
+    return fresh(g.best, g.seed, 'play', g.auto ? lookFor() : g, cfg)
   }
   if (move === 'duck' && cfg.duckTicks > 0) {
     if (g.jump < 0) return g.duck > 0 ? g : { ...g, duck: cfg.duckTicks, queued: false }
@@ -455,10 +535,14 @@ export const header = (g: Game, keys = 'space / ↑'): string => {
   return ` ${g.costume} · grab ☁, dodge or fix bugs · ${keys} to start`
 }
 
-/**
- * The desktop's one line of guidance. While a run plays the picture counts the score itself, so the
- * line says only what the keys do: it is then the same line for the whole run, and the band is not
- * redrawn for it.
- */
-export const deskLine = (g: Game, keys = 'space / ↑'): string =>
-  g.mode === 'play' ? ` ${keys} to jump · ↓ or J to duck · Q to close` : header(g, keys)
+/** The terminal's header: while a new stage's title is up it leads the line, then the usual one comes back. */
+export const termHeader = (g: Game, keys = 'space / ↑'): string =>
+  g.mode === 'play' && g.auto && g.stage > 0 && g.stageAge >= 0
+    ? ` ${stageOf(g.stage).name} · score ${num(g.score)} · best ${num(g.best)}`
+    : header(g, keys)
+
+/** How many finished runs of a session the desktop spells the keys out for: the first game only. */
+export const HINT_RUNS = 1
+
+/** Whether the row of key hints above the picture is gone: once the session's first game is over. */
+export const deskQuiet = (runs: number): boolean => runs >= HINT_RUNS

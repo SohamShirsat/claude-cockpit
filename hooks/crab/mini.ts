@@ -28,6 +28,15 @@ type Mini = { hat: string[]; palette: Record<string, string>; props: readonly [P
 // Prop coordinates count from the sprite's top-left, hat included.
 const MINI: Record<CostumeId, Mini> = {
   plain: { hat: [], palette: {}, props: [[], []] },
+  swimmer: {
+    hat: ['...uuu...', '.uuuuuuu.'],
+    palette: { u: '#1CA7C9', g: '#23576B', r: '#E5484D', w: '#F8F6F1', y: '#F5C542' },
+    // goggle rims round the eyes, a striped ring across the belly, and a snorkel that sways
+    props: [
+      [[1, 3, 'g'], [3, 3, 'g'], [5, 3, 'g'], [7, 3, 'g'], [0, 4, 'r'], [1, 4, 'w'], [2, 4, 'r'], [3, 4, 'w'], [4, 4, 'r'], [5, 4, 'w'], [6, 4, 'r'], [7, 4, 'w'], [8, 4, 'r'], [8, 0, 'y'], [8, 1, 'y']],
+      [[1, 3, 'g'], [3, 3, 'g'], [5, 3, 'g'], [7, 3, 'g'], [0, 4, 'r'], [1, 4, 'w'], [2, 4, 'r'], [3, 4, 'w'], [4, 4, 'r'], [5, 4, 'w'], [6, 4, 'r'], [7, 4, 'w'], [8, 4, 'r'], [7, 0, 'y'], [8, 1, 'y']],
+    ],
+  },
   astronaut: {
     hat: ['....t....', '.wwwwwww.'],
     palette: { t: '#7F77DD', w: '#E6E8EE', s: '#F5C542' },

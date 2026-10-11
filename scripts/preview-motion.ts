@@ -12,7 +12,7 @@ const cfg = deskConfigFor(420)
 const bot = pilot
 
 const start = Number(process.argv[3] ?? 0)
-let g = act(fresh(120, 11, 'ready', lookFor('chef', 0), cfg), cfg)
+let g = act(fresh(120, 11, 'ready', lookFor('chef'), cfg), cfg)
 for (let i = 0; i < 4000 && g.score < start; i++) g = step(bot(g, cfg, { stomp: process.env.STOMP === '1' }), cfg)
 
 // the plan is the run as this player plays it, a press at a time

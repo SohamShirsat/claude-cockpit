@@ -2,6 +2,74 @@
 
 What changed in each version, newest first. (The plugin's version lives in `.claude-plugin/plugin.json`.)
 
+## 0.13.9
+
+- The first game's key hint (`J duck · K jump`) sits lower, with a clear row of air between it and the `HI` score above it (it was crowding it).
+
+## 0.13.8
+
+**The first game's key hint is part of the picture, so the band never changes size.**
+- 0.13.7 put the J / K row above the picture for the first game, which made the band one row taller then and shorter afterwards. That row is gone for good: the band is the same size in every game.
+- The hint (`J duck · K jump`) is now drawn inside the picture, right-aligned under the `HI` score, for the first game of a session only (it also steps aside while a new stage's title is up in that same row). From the second game on it is simply not drawn.
+- The J and K buttons are always in the band, hidden (zero size, clipped, inside the band), so the keys work the same in every game.
+
+## 0.13.7
+
+**J and K keep working after the hints leave the screen.**
+- 0.13.6 drew no J / K buttons from the second game on. But the desktop only hands keys to the game through a Button's hotkey (the band holds the focus after a click on Play), so with the buttons gone, J and K did nothing. The buttons are now always in the band's tree.
+- First game of a session: the `▼ duck` / `▲ jump` row sits **above** the picture, on the left, opposite the scoreboard on the right (where the old key field was).
+- From the second game on: the same two buttons are drawn in a Box with no size, clipped, at the picture's corner. Nothing shows (a visible hotkey would be drawn as a chip), but they stay inside the band and keep their hotkeys. K starts, retries and jumps; J ducks. Space, ↑ and ↓ still play from the prompt box.
+- The text hint (`space / ↑ to start`) is gone: the buttons are the hint.
+
+## 0.13.6
+
+**The game is just the picture.**
+- The key field on the left is gone, with the focus-ring code that fed it (`hooks/keys.ts`, the `ui.focus` hook, the "click here" / "esc to type" lines). Nothing is drawn above the picture; the scoreboard stays in its top-right corner.
+- The first game of a session has one row **under** the picture: `space / ↑ to start` and the `J ▼ duck` / `K ▲ jump` buttons (J and K work).
+- When that game is over, the row is gone for the rest of the session, buttons included: the desktop draws a hotkey as a chip, so a Button that keeps its hotkey cannot be hidden. From then on the keys are read at the prompt box: **Space** and **↑** start and jump, **↓** and **J** duck and **K** jumps while a run is live.
+- Q no longer closes the game (it was a key of the field); the ■ close in the band does.
+- The trace log names the real version (it said `v0.12.0` before).
+
+## 0.13.5
+
+- **J and K work again.** 0.13.3 took the `j` and `k` hotkeys off the duck and jump buttons together with their words, so those keys did nothing once the hints were gone. The buttons now always keep their hotkeys; only the words come and go.
+- **Hints for the first game of each session only.** The first game shows `any key to start` and `J ▼ duck` / `K ▲ jump`; from the second game on, the line is empty and the buttons are blank (but still there, and still work). The count is per session, not kept between sessions.
+- The trace log now names the real version (it said `v0.12.0` for every release since).
+- The key field has no Enter label or submit button (Enter still plays).
+
+## 0.13.3
+
+- **The keys are taught, then quiet.** For a player's first 3 finished runs the line above the picture says `any key to start` / `any key to jump` and the buttons read `J ▼ duck` and `K ▲ jump`. After that the line is empty and the buttons have no words, so a regular player sees nothing but the game. The count of runs is kept between sessions. (`HINT_RUNS` in `hooks/crab/game.ts`.)
+- `any key to retry` is gone for everyone: a run that is over shows `GAME OVER` in the picture, and any key still retries.
+- A line that fixes something is still shown: `click here, then any key` (the keyboard has not reached the game) and `esc to type` (the game outlived the turn).
+- The duck and jump buttons stay in place, blank: the arrow keys move the focus ring onto them, and that is how ↓ ducks and ↑ jumps while the key field has the focus.
+- 6 new tests.
+
+## 0.13.2
+
+**A cleaner band while you play.** The line above the picture said the score, clouds, fixes and best, and the picture said them again; the line was too long for its field and ended in a cut-off word.
+- The line is now just what the keys do: `any key to jump` (or `start`, `retry`). The star, the `game over 0365 · ☁ 3 · ✓ 6` text and the extra `jump` button next to the field are gone. The duck and jump buttons (J, K) stay on the right.
+- The scoreboard (clouds, bugs fixed, score, best) is all in the top right corner. The top left, above the crab, is clear, so its whole jump can be seen.
+- `GAME OVER` is drawn in the picture. Before a run starts the picture says what to do (`grab clouds, dodge or fix bugs`).
+- The first-sight notes ("moth! duck under it...") moved up into the clear top row, between the crab and the scoreboard, so they no longer cover the clouds and shields they are about. On a very narrow field, where they do not fit, they stay where they were.
+- 9 new tests (the line, the corner, the strip's placement at every field width).
+
+## 0.13.1
+
+- **Worlds stay longer.** A stage used to last 7 to 8 seconds, too short to see the costume or the world. Stages now come every 450 points (Beach 450, Kitchen 900, Speedway 1350, Build site 1800, Rainy city 2250, Storm at sea 2700, Moon 3150, lap 3600): about half a minute each, desktop or terminal. The difficulty curve is unchanged (it reads the score only), and the stage title stays up a little longer (3.6 s). A test holds every stage to at least 20 seconds.
+
+## 0.13.0
+
+**The journey.** As the score climbs, the crab changes costume by itself and the world changes with it. Eight stages, one per costume (Meadow, Beach, Kitchen, Speedway, Build site, Rainy city, Storm at sea, Moon), each with its own sky, far scenery, ground and weather (rain, steam, gulls, speed lines, sparks, lightning, a meteor), then round again. A stage gives +25 and shows its name under the score; nothing pauses or moves. The bugs, clouds and crab are the same in every world and the hit-boxes never change: the tests hold every world's colors to a contrast floor against what is played in front of it. Setting `costume = auto` is now this journey (it used to pick a new costume per run); naming a costume keeps that costume and its world for the whole run.
+
+- **New costume: swimmer** (swim cap, goggles, striped ring, swaying snorkel).
+- **Faster and harder.** Starts at 125 units/s (was 100) and reaches full speed (215) by a score of about 800 (was 1400). The gap to the next obstacle is sized for the speed the run will have when it arrives, not for the top speed, so the early game is about 40% denser. Obstacles unlock sooner (beetle 40, moth 70, twin 120, pit 180).
+- **New hurdle: the tall stack** (from 300): only a jump near the top of the arc clears it; landing on top works too.
+- **Gauntlets**: set pieces (staircase, duck-and-hop, pit with a bug on the far side, three in a row) that come more often as the score rises. A brute-force solver in the tests checks that each has a way through that forgives two ticks (80 ms) on every move, at every speed and pit width it can appear at.
+- **Cheap to draw.** Worlds are drawn as part of the same plan the game already sends (no extra redraws): a stage that changes inside a plan swaps the costume and crossfades the sky in the picture itself. Repeating scenery is an SVG pattern tile, so it costs the same however far the picture scrolls; weather loops by itself on the display's clock. Sparse and slow tracks are sampled less often (a plan across a stage change is about 80 to 90 KB; the busiest plan at top speed stays under 100 KB). Reduced motion switches the loops off.
+- **Terminal:** the same stage costumes, the stage name on the header for a moment, a tinted ground line, and a few dim pixels of rain, stars or speed lines.
+- 35 new tests (stage maths, the journey end to end, fairness solver, contrast, markup, budgets).
+
 ## 0.12.0
 
 - The project is now called **Claude Cockpit** (repository `claude-cockpit`, marketplace `claude-cockpit`; the plugin itself is still `status-band`). Install commands changed, see the README. The old GitHub address redirects.

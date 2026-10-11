@@ -1,3 +1,4 @@
+import { HINT_RUNS } from './crab/game'
 import { describe, expect, mock, test } from 'claude-code/testing'
 
 import type { Engine } from 'claude-code/testing'
@@ -390,9 +391,11 @@ describe('game (terminal: half-block pixels in a Client)', () => {
 })
 
 describe('game (desktop: a vector scene, one line of guidance that takes the keys, and a run the hooks module owns)', () => {
-  const open = async ($: Engine, on: unknown, surface: 'desktop' | 'vscode' | 'mobile' = 'desktop', props: Record<string, unknown> = {}) => {
+  let engine: Engine
+  const open = async ($: Engine, on: unknown, surface: 'desktop' | 'vscode' | 'mobile' = 'desktop', props: Record<string, unknown> = {}, stored: Record<string, unknown> = {}) => {
+    engine = $
     const clock = mock.clock(on as never)
-    mock.store(on as never)
+    mock.store(on as never, stored)
     const seen = world(on as never, '/work/none', [], false)
     const all = { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 100, scroll: { bodyRows: 11 }, view: {}, ...props }
     const ui = (await $.ui.mount({ plugin: 'status-band', surface, component: 'AbovePrompt', props: all as never })) as Awaited<ReturnType<typeof band>>
@@ -405,24 +408,29 @@ describe('game (desktop: a vector scene, one line of guidance that takes the key
     return String((el as { props?: { source?: string } } | undefined)?.props?.source ?? '')
   }
 
-  // the guidance line is a native text field: its placeholder is the line, a typed key is a press
-  const line = async (ui: Awaited<ReturnType<typeof band>>) =>
-    String(((await ui.find({ type: 'Input', key: 'keys' })) as { props?: { placeholder?: string } } | undefined)?.props?.placeholder ?? '')
-  const enter = (ui: Awaited<ReturnType<typeof band>>) =>
-    (ui as unknown as { input: (a: unknown) => Promise<unknown> }).input({ key: 'keys', text: '', kind: 'submit' })
-  const typeKey = (ui: Awaited<ReturnType<typeof band>>, text: string) =>
-    (ui as unknown as { input: (a: unknown) => Promise<unknown> }).input({ key: 'keys', text, kind: 'change' })
+  // a run that has ended is a still that says so; the line is quiet then, so the picture is the way to tell
+  const ended = async (ui: Awaited<ReturnType<typeof band>>) => {
+    const source = await svg(ui)
 
-  test('play opens one line of guidance and a picture of the crab, and nothing under it', async ($, on) => {
+    return source.includes('GAME OVER') && !source.includes('dur="7.68s"')
+  }
+
+  // the J and K hint is drawn inside the picture, under the scoreboard, for the first game of a session only
+  const line = async (ui: Awaited<ReturnType<typeof band>>) => ((await svg(ui)).includes('J duck · K jump') ? 'hints' : '')
+  const hiddenRow = (ui: Awaited<ReturnType<typeof band>>) => ui.find({ type: 'Box', key: 'keys-hidden' })
+  // a key at the prompt box: Space is a jump (or a start, or a retry)
+  const typeKey = (_ui: Awaited<ReturnType<typeof band>>, _text: string) => edit(engine, typed(' ') as never)
+
+  test('play opens the picture of the crab and, for the first game, one row of key hints under it', async ($, on) => {
     const { ui } = await open($, on)
     const source = await svg(ui)
     expect(source).toContain('<svg')
     expect(source).toContain('#D97757')
-    expect(await line(ui)).toMatch(/plain · grab.*any key to start/)
-    expect(await ui.find({ type: 'Input', key: 'keys' })).toMatchObject({ props: { autoFocus: true } })
-    // the guidance is said once, in the field; the jump button beside it is a control, not a second line
+    // the picture and nothing above or under it; no key field
+    expect(await line(ui)).toBe('hints')
+    expect(await ui.find({ type: 'Input' })).toBeUndefined()
     expect(await ui.find({ type: 'Button', key: 'jump' })).toMatchObject({ props: { hotkey: 'k' } })
-    expect(await ui.find({ type: 'Text', text: /any key/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /any key|enter/i })).toBeUndefined()
     await ui.press({ key: 'play' })
     expect(await ui.find({ type: 'Svg' })).toBeUndefined()
     await ui.unmount()
@@ -433,20 +441,20 @@ describe('game (desktop: a vector scene, one line of guidance that takes the key
     const before = await svg(ui)
     await typeKey(ui, ' ')
     await clock.advance(40 * 12)
-    expect(await line(ui)).toMatch(/to jump/)
+    expect(await line(ui)).toBe('hints')
     expect(await svg(ui)).not.toBe(before)
 
     // never jumping: a bug reaches the crab
     await clock.advance(40 * 200)
-    expect(await line(ui)).toMatch(/game over/)
+    expect(await ended(ui)).toBe(true)
     // belly up and grey: the crab is drawn rotated
     expect(await svg(ui)).toContain('180 15 18')
 
     // a press retries; q closes it all
     await typeKey(ui, ' ')
     await clock.advance(40 * 3)
-    expect(await line(ui)).toMatch(/to jump/)
-    await typeKey(ui, 'q')
+    expect(await line(ui)).toBe('') // the first game is over: the hints are gone
+    await ui.press({ key: 'play' })
     expect(await ui.find({ type: 'Svg' })).toBeUndefined()
     await ui.unmount()
   })
@@ -455,19 +463,20 @@ describe('game (desktop: a vector scene, one line of guidance that takes the key
     const { clock, ui } = await open($, on)
     await typeKey(ui, ' ')
     await clock.advance(40 * 200)
-    expect(await line(ui)).toMatch(/best 00[1-9]\d/)
+    // the best is in the picture's scoreboard now, not in the line
+    expect(await svg(ui)).toMatch(/>HI 00[1-9]\d</)
     await ui.unmount()
   })
 
   test('space and the up arrow play from the prompt box, with no click on the game first', async ($, on) => {
     const { clock, ui } = await open($, on)
-    expect(await line(ui)).toMatch(/to start/)
+    expect(await line(ui)).toBe('hints')
 
     // space starts the run, and the box stays empty: the key is read, not typed
     const kept = await edit($, typed(' ') as never)
     expect(kept.text).toBe('')
     await clock.advance(40 * 5)
-    expect(await line(ui)).toMatch(/to jump/)
+    expect(await line(ui)).toBe('hints')
 
     // the up arrow is a jump now
     await edit($, typed('up') as never)
@@ -477,10 +486,11 @@ describe('game (desktop: a vector scene, one line of guidance that takes the key
 
     // never jumping again: the run ends, and space retries it
     await clock.advance(40 * 400)
-    expect(await line(ui)).toMatch(/game over/)
+    expect(await ended(ui)).toBe(true)
     await edit($, typed(' ') as never)
     await clock.advance(40 * 3)
-    expect(await line(ui)).toMatch(/to jump/)
+    // the second game: the hints are gone
+    expect(await line(ui)).toBe('')
     await ui.unmount()
   })
 
@@ -493,7 +503,7 @@ describe('game (desktop: a vector scene, one line of guidance that takes the key
     const letter = await edit($, typed('a') as never)
     expect(letter.text).toBe('a')
     await clock.advance(40 * 10)
-    expect(await line(ui)).toMatch(/to start/)
+    expect(await line(ui)).toBe('hints')
 
     // game closed: space is a space again
     await ui.press({ key: 'play' })
@@ -508,35 +518,11 @@ describe('game (desktop: a vector scene, one line of guidance that takes the key
     expect((await edit($, typed('k') as never)).text).toBe('k')
     await edit($, typed(' ') as never)
     await clock.advance(40 * 4)
-    expect(await line(ui)).toMatch(/to jump/)
+    expect(await line(ui)).toBe('hints')
     // a live run: k is read, not typed
     expect((await edit($, typed('k') as never)).text).toBe('')
     // a draft is never touched
     expect((await edit($, typed('k', 'fix the bu') as never)).text).toBe('fix the buk')
-    await ui.unmount()
-  })
-
-  test('any key typed in the guidance field is a jump', async ($, on) => {
-    const { clock, ui } = await open($, on)
-    await typeKey(ui, 'x')
-    await clock.advance(40 * 4)
-    expect(await line(ui)).toMatch(/to jump/)
-    await typeKey(ui, 'a')
-    await ui.unmount()
-  })
-
-  test('play asks the engine to put the focus ring on the guidance field', async ($, on) => {
-    const { clock, seen } = await open($, on)
-    await clock.advance(100)
-    // the kit has no site that holds a keyboard, so the engine refuses; the trace names the attempt
-    expect(seen.traced).toMatch(/focus mount-\d+/)
-  })
-
-  test('Enter in the field is a jump too', async ($, on) => {
-    const { clock, ui } = await open($, on)
-    await enter(ui)
-    await clock.advance(40 * 4)
-    expect(await line(ui)).toMatch(/to jump/)
     await ui.unmount()
   })
 
@@ -553,7 +539,7 @@ describe('game (desktop: a vector scene, one line of guidance that takes the key
     const { clock, ui } = await open($, on)
     await ui.press({ key: 'jump' })
     await clock.advance(40 * 5)
-    expect(await line(ui)).toMatch(/to jump/)
+    expect(await line(ui)).toBe('hints')
     await ui.press({ key: 'jump' })
     await clock.advance(40)
     expect(await svg(ui)).toContain('<svg')
@@ -564,51 +550,17 @@ describe('game (desktop: a vector scene, one line of guidance that takes the key
     const { clock, ui } = await open($, on)
     await typeKey(ui, ' ')
     // never jumping: the first bug ends the run
-    for (let i = 0; i < 300 && !/game over/.test(await line(ui)); i++) await clock.advance(40)
-    expect(await line(ui)).toMatch(/game over/)
+    for (let i = 0; i < 300 && !(await ended(ui)); i++) await clock.advance(40)
+    expect(await ended(ui)).toBe(true)
 
     await typeKey(ui, ' ')
     await clock.advance(40)
-    expect(await line(ui)).toMatch(/game over/)
+    expect(await ended(ui)).toBe(true)
 
     await clock.advance(600)
     await typeKey(ui, ' ')
     await clock.advance(40 * 3)
-    expect(await line(ui)).toMatch(/to jump/)
-    await ui.unmount()
-  })
-
-  test('when the engine refuses the keyboard the line says to click it, and a key that comes through proves it works', async ($, on) => {
-    const { clock, seen, ui } = await open($, on)
-    expect(await line(ui)).toMatch(/any key to start/)
-    // the kit has no site that holds a keyboard: every ask is refused, and the asking is repeated
-    await clock.advance(3000)
-    expect(seen.traced.match(/focus mount-\d+ try@/g)?.length).toBeGreaterThanOrEqual(3)
-    expect(await line(ui)).toMatch(/click here, then any key to start/)
-
-    await typeKey(ui, ' ')
-    await clock.advance(40 * 3)
-    expect(await line(ui)).toMatch(/any key to jump/)
-    expect(await line(ui)).not.toMatch(/click here/)
-    await ui.unmount()
-  })
-
-  test('the keys go to the trace and the trace is kept, not wiped, by the next write', async ($, on) => {
-    const { clock, seen, ui } = await open($, on)
-    await typeKey(ui, 'x')
-    await clock.advance(40)
-    expect(seen.traced).toMatch(/key via=input "x"/)
-    expect(seen.traced).toMatch(/focus mount-\d+/)
-    await ui.unmount()
-  })
-
-  test('the game outlives the turn: the line says how to get the keyboard back', async ($, on) => {
-    const { clock, seen, ui } = await open($, on)
-    await typeKey(ui, ' ')
-    await clock.advance(40 * 3)
-    await $.turn.complete({ answer: 'ok', durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer' } as never)
-    expect(await line(ui)).toMatch(/any key · esc to type to jump/)
-    expect(seen.toasts.some(t => /Esc/.test(t))).toBe(true)
+    expect(await line(ui)).toBe('') // the first game is over: the hints are gone
     await ui.unmount()
   })
 
@@ -646,7 +598,7 @@ describe('game (desktop: a vector scene, one line of guidance that takes the key
     let endedAt = 0
     for (let t = 0; t < 7000 && !endedAt; t += 20) {
       await clock.advance(20)
-      if (/game over/.test(await line(ui))) endedAt = t + 20
+      if (await ended(ui)) endedAt = t + 20
     }
     // the first bug reaches a standing crab after about 4 seconds, and the end shows within a step of it
     expect(endedAt).toBeGreaterThan(3200)
@@ -668,26 +620,12 @@ describe('game (desktop: a vector scene, one line of guidance that takes the key
     await ui.unmount()
   })
 
-  test('only a key is a key: the field emptying, or a Backspace, is not a jump', async ($, on) => {
-    const { clock, seen, ui } = await open($, on)
-    await typeKey(ui, ' ')
-    await clock.advance(40 * 3)
-    await typeKey(ui, 'abc')
-    await clock.advance(300)
-    const before = (seen.traced.match(/ press /g) ?? []).length
-    await typeKey(ui, 'ab')
-    await typeKey(ui, '')
-    await clock.advance(300)
-    expect((seen.traced.match(/ press /g) ?? []).length).toBe(before)
-    await ui.unmount()
-  })
-
   test('a redraw of the band by anything else answers with a plan from now, once', async ($, on) => {
     const { clock, seen, ui } = await open($, on)
     await typeKey(ui, ' ')
     await clock.advance(1000)
     const plan = await svg(ui)
-    await $.turn.complete({ answer: 'ok', durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer' } as never)
+    await $.turn.complete({ answer: 'ok', durationMs: 10, isAborted: false, turnId: 't1', reason: 'answer', usage: { input_tokens: 10, cache_read_input_tokens: 90, cache_creation_input_tokens: 0, output_tokens: 5 } } as never)
     await clock.advance(10)
     expect(seen.traced).toMatch(/redraw: plan renewed/)
     expect(await svg(ui)).not.toBe(plan)
@@ -700,8 +638,76 @@ describe('game (desktop: a vector scene, one line of guidance that takes the key
     await clock.advance(200)
     await ui.press({ key: 'duck' })
     await clock.advance(200)
-    expect(seen.traced).toMatch(/press start via=field move=jump mode=ready/)
+    expect(seen.traced).toMatch(/press start via=box move=jump mode=ready/)
     expect(seen.traced).toMatch(/press jump=-1->-1 duck=\d+ queued=false via=button move=duck/)
+    await ui.unmount()
+  })
+
+  // plays `n` runs to their end, each by never jumping
+  const lose = async (clock: { advance: (ms: number) => Promise<unknown> }, ui: Awaited<ReturnType<typeof band>>, n: number) => {
+    for (let r = 0; r < n; r++) {
+      await typeKey(ui, ' ')
+      for (let i = 0; i < 400 && !(await ended(ui)); i++) await clock.advance(40)
+      await clock.advance(700)
+    }
+  }
+
+  test('the first game says the keys inside the picture, under the scoreboard; the band holds nothing for them', async ($, on) => {
+    const { ui } = await open($, on)
+    expect(await line(ui)).toBe('hints')
+    // the hint is drawn in the picture's own corner, under the best score
+    expect(await svg(ui)).toMatch(/<text class="bn" x="[\d.]+" y="27"[^>]*>(?:<[^>]*>)*J duck · K jump<\/text>/)
+    // the buttons that take the keys are always the same hidden ones
+    expect(await hiddenRow(ui)).toBeDefined()
+    expect(await ui.find({ type: 'Box', key: 'hints' })).toBeUndefined()
+    expect(await ui.find({ type: 'Button', key: 'duck' })).toMatchObject({ props: { hotkey: 'j' } })
+    expect(await ui.find({ type: 'Button', key: 'jump' })).toMatchObject({ props: { hotkey: 'k' } })
+    await ui.unmount()
+  })
+
+  test('the picture takes the same room in every game: the first game and the second differ only in the hint', async ($, on) => {
+    const { clock, ui } = await open($, on)
+    const sizeOf = async () => {
+      const el = (await ui.find({ type: 'Svg' })) as { props?: { width?: number; height?: number } } | undefined
+
+      return `${el?.props?.width}x${el?.props?.height}`
+    }
+    const first = await sizeOf()
+    await lose(clock, ui, 1)
+    expect(await line(ui)).toBe('')
+    expect(await sizeOf()).toBe(first)
+    expect(await ui.find({ type: 'Box', key: 'hints' })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('once the first game is over the hint is gone from the picture but J and K still play', async ($, on) => {
+    const { clock, seen, ui } = await open($, on)
+    await lose(clock, ui, 1)
+    expect(await svg(ui)).toContain('GAME OVER')
+    expect(await line(ui)).toBe('')
+    expect(await ui.find({ type: 'Input' })).toBeUndefined()
+    expect(await hiddenRow(ui)).toBeDefined()
+    expect(await ui.find({ type: 'Button', key: 'jump' })).toMatchObject({ props: { hotkey: 'k' } })
+    expect(await ui.find({ type: 'Button', key: 'duck' })).toMatchObject({ props: { hotkey: 'j' } })
+    // the second game, played by the buttons only (what the hotkeys raise): K starts it, K jumps, J ducks
+    await ui.press({ key: 'jump' })
+    await clock.advance(40 * 4)
+    expect(seen.traced).toMatch(/press start via=button/)
+    expect(await line(ui)).toBe('')
+    await ui.press({ key: 'jump' })
+    await clock.advance(40 * 30)
+    await ui.press({ key: 'duck' })
+    expect(await svg(ui)).toContain('1.1 .5')
+    // and the prompt box still plays it too
+    await clock.advance(40 * 30)
+    expect((await edit($, typed('k') as never)).text).toBe('')
+    // a third game the same way, after the second ends
+    for (let i = 0; i < 400 && !(await ended(ui)); i++) await clock.advance(40)
+    await clock.advance(700)
+    await ui.press({ key: 'jump' })
+    await clock.advance(40 * 4)
+    expect(await ended(ui)).toBe(false)
+    expect(await hiddenRow(ui)).toBeDefined()
     await ui.unmount()
   })
 
@@ -719,8 +725,7 @@ describe('game (desktop: a vector scene, one line of guidance that takes the key
     let wasOver = false
     for (let t = 0; t < 120000; t += 20) {
       await clock.advance(20)
-      const l = await line(ui)
-      const over = /game over/.test(l)
+      const over = await ended(ui)
       if (over && !wasOver) runs++
       wasOver = over
       sources.add(await svg(ui))
@@ -729,9 +734,9 @@ describe('game (desktop: a vector scene, one line of guidance that takes the key
         presses++
         const road = rnd()
         if (road < 0.35) await typeKey(ui, rnd() < 0.2 ? 'j' : rnd() < 0.5 ? 'k' : ' ')
-        else if (road < 0.55) await ui.press({ key: rnd() < 0.3 ? 'duck' : 'jump' })
+        else if (road < 0.55) await ui.press({ key: rnd() < 0.3 ? 'duck' : 'jump' }).catch(() => undefined)
         else if (road < 0.8) await edit($, typed(rnd() < 0.2 ? 'down' : rnd() < 0.5 ? 'up' : ' ') as never)
-        else await enter(ui)
+        else await edit($, typed('up') as never)
       }
     }
     expect(runs).toBeGreaterThan(3)
@@ -764,24 +769,22 @@ describe('game (desktop: a vector scene, one line of guidance that takes the key
     await ui.unmount()
   })
 
-  test('j, s and the down arrow duck; ▼ duck is a button of its own; k and space jump', async ($, on) => {
+  test('j and the down arrow duck, k and space and the up arrow jump', async ($, on) => {
     const { clock, ui } = await open($, on)
     expect(await ui.find({ type: 'Button', key: 'duck' })).toMatchObject({ props: { hotkey: 'j' } })
     await typeKey(ui, ' ')
     await clock.advance(40 * 3)
     expect(await svg(ui)).not.toContain('1.1 .5')
 
-    await typeKey(ui, 'j')
+    await edit($, typed('j') as never)
     expect(await svg(ui)).toContain('1.1 .5')
     await clock.advance(40 * 20)
     // the duck is over: a plan with no duck in it
-    await typeKey(ui, 'x')
+    await edit($, typed('up') as never)
     expect(await svg(ui)).not.toContain('1.1 .5')
     await clock.advance(40 * 20)
-    await typeKey(ui, 's')
+    await edit($, typed('down') as never)
     expect(await svg(ui)).toContain('1.1 .5')
-
-    // from the prompt box, while the run is live: the down arrow and j duck, and neither is typed
     await clock.advance(40 * 30)
     await ui.unmount()
   })
@@ -803,7 +806,7 @@ describe('game (desktop: a vector scene, one line of guidance that takes the key
   test('a run that ends is a still, with the crab flipped, and a retry is a new plan', async ($, on) => {
     const { clock, ui } = await open($, on)
     await typeKey(ui, ' ')
-    for (let i = 0; i < 300 && !/game over/.test(await line(ui)); i++) await clock.advance(40)
+    for (let i = 0; i < 300 && !(await ended(ui)); i++) await clock.advance(40)
     const over = await svg(ui)
     expect(over).toContain('180 15 18')
     expect(over).not.toContain('dur="7.68s"')

@@ -21,12 +21,12 @@ export type Repo = {
   dirty: number
 }
 
-export type CostumeId = 'plain' | 'astronaut' | 'detective' | 'engineer' | 'chef' | 'racer' | 'pirate'
+export type CostumeId = 'plain' | 'swimmer' | 'astronaut' | 'detective' | 'engineer' | 'chef' | 'racer' | 'pirate'
 
 export type GameMode = 'ready' | 'play' | 'over'
 
-/** What comes at the crab: bugs to jump or stomp, a moth to duck, twin bugs, a pit to jump over. */
-export type Kind = 'bug' | 'beetle' | 'moth' | 'twin' | 'pit'
+/** What comes at the crab: bugs to jump or stomp, a moth to duck, twin bugs, a pit to jump over, a tall stack to clear. */
+export type Kind = 'bug' | 'beetle' | 'moth' | 'twin' | 'pit' | 'tower'
 
 /**
  * Something coming at the crab: `x` its left edge, `w` and `h` its size, `base` how far its underside is
@@ -92,9 +92,12 @@ export type Game = {
   /** ground scroll */
   off: number
   costume: CostumeId
-  /** the costume changes with every new run */
+  /** the journey: the costume (and the world drawn around it) changes as the score climbs */
   auto: boolean
-  run: number
+  /** how many stages of the journey have been reached this run (it only goes up; see stages.ts) */
+  stage: number
+  /** ticks since the last stage began, -1 once its title has been shown */
+  stageAge: number
 }
 
 /** What the band draws of the desktop's run: the game now (for the guidance line) and the picture (a plan, see scene.ts). */
